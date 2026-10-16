@@ -2,6 +2,7 @@
 
 ## 0.14.3 — 2026-10-16
 
+- 将脚本 `@namespace` 更新为项目仓库 `https://github.com/TianSamsara/byj_xxt`，重建脚本时保持一致。
 - 修复学习通富文本编辑器外层 DIV 被当成另一个答题区的问题：将包住已注册 UEditor 的 `.eidtDiv`、`.textDIV`、`contenteditable` 容器视为同一编辑器，解决 `editable:DIV, editor:edui1/edui78` 重复计数。
 - 真正独立的编辑器或输入字段仍保留逐区校验；简答题的多个要点继续合并写入一个编辑器。
 - AI 连接增加“启动本地桥接”“检测连接”和连接状态；启动后等待最多约 30 秒，就绪后自动加载模型，区分未启动、密钥错误和旧版服务。

@@ -8,6 +8,7 @@ def replace(old, new):
         raise RuntimeError('源码不匹配: ' + old[:90])
     s = s.replace(old, new)
 
+replace('// @namespace    https://github.com/local/xxt-assistant', '// @namespace    https://github.com/TianSamsara/byj_xxt')
 replace('// @version      0.13.2', '// @version      0.14.3')
 replace('// @description  学习通页面内控制面板：', '// @description  支持本地 Codex 登录、模型与思考强度选择；学习通页面内控制面板：')
 # Prevent the published upstream version from overwriting this local build.
