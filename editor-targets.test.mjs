@@ -88,6 +88,23 @@ test('an empty instants table does not hide instances or pick an editor belongin
   const targets = f.c.blankTargets(f.question);
   assert.equal(targets.length, 1); assert.equal(targets[0].editor, e.editor);
 });
+
+test('Chaoxing editable DIV wrappers around a registered UEditor are not independent answer areas', async () => {
+  for (const attrs of [{ class: 'eidtDiv' }, { class: 'textDIV' }, { contenteditable: 'true' }]) {
+    const f = fixture();
+    const wrapper = new f.Node('div', attrs, f.question);
+    const e = editorFixture(f, 'edui78', wrapper);
+    f.c.window.UE = { instants: { edui78: e.editor } };
+    const independent = new f.Node('textarea', { id: 'other-answer' }, f.question);
+    assert.equal(f.c.blankTargets(f.question).length, 2, 'a real independent field must remain');
+    independent.computedDisplay = 'none';
+    const targets = f.c.blankTargets(f.question);
+    assert.equal(targets.length, 1); assert.equal(targets[0].kind, 'editor');
+    const result = await f.c.fillBlanks(f.question, ['步骤一', '步骤二', '局限一', '局限二'], 'essay');
+    assert.equal(result.ok, true, result.reason);
+    assert.equal(e.editor.getContentTxt(), '步骤一\n步骤二\n局限一\n局限二');
+  }
+});
 test('CSS-hidden fields, hidden ancestors and toolbar controls are excluded while a textarea remains writable', async () => {
   const f = fixture();
   const answer = new f.Node('textarea', { id: 'visible-answer' }, f.question);

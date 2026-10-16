@@ -8,7 +8,7 @@ def replace(old, new):
         raise RuntimeError('源码不匹配: ' + old[:90])
     s = s.replace(old, new)
 
-replace('// @version      0.13.2', '// @version      0.14.2')
+replace('// @version      0.13.2', '// @version      0.14.3')
 replace('// @description  学习通页面内控制面板：', '// @description  支持本地 Codex 登录、模型与思考强度选择；学习通页面内控制面板：')
 # Prevent the published upstream version from overwriting this local build.
 s = '\n'.join(line for line in s.split('\n') if not line.startswith(('// @downloadURL', '// @updateURL')))
@@ -89,6 +89,21 @@ replace("    ui('provider').onchange = chooseProvider;", "    ui('provider').onc
 replace("    settings = { ...settings, endpoint, model, key,", "    settings = { ...settings, endpoint, model, key,\n      reasoningEffort: ui('provider').value === 'codex' ? ui('reasoning-effort').value : '',")
 replace("        data: JSON.stringify({ model: settings.model,", "        data: JSON.stringify({ model: settings.model,\n          ...(settings.provider === 'codex' && settings.reasoningEffort ? { reasoning_effort: settings.reasoningEffort } : {}),")
 replace('    .panel[hidden]{display:none}', '    .panel[hidden],#reasoning-field[hidden],#reasoning-hint[hidden]{display:none}')
+# Windows 启动器只注册一次；日常从面板发起启动，再检测健康状态和获取模型。
+replace('            <label class="field">API 地址', '''            <div class="settings-card" id="local-bridge" hidden>
+              <b>本地桥接</b><p class="hint" id="bridge-status" role="status" aria-live="polite">点击检测连接，或启动本地桥接。</p>
+              <div class="row"><button class="action secondary" id="start-bridge">启动本地桥接</button><button class="action secondary" id="check-bridge">检测连接</button></div>
+              <p class="hint">首次使用：在项目目录运行 install-bridge-launcher.ps1 注册 Windows 启动器。以后可在这里启动；浏览器提示时允许打开。启动后自动获取模型，原连接密钥继续使用。</p>
+            </div>
+            <label class="field">API 地址''')
+replace('#reasoning-hint[hidden]{display:none}', '#reasoning-hint[hidden],#local-bridge[hidden]{display:none}')
+replace("    ui('reasoning-field').hidden = !isCodex;", "    ui('local-bridge').hidden = !isCodex;\n    ui('reasoning-field').hidden = !isCodex;")
+replace("  function chooseProvider() {", Path('userscript/bridge-controls.js').read_text(encoding='utf-8') + '\n  function chooseProvider() {')
+replace("    ui('get-models').onclick = fetchModels;", "    ui('get-models').onclick = fetchModels;\n    ui('start-bridge').onclick = startLocalBridge;\n    ui('check-bridge').onclick = () => checkLocalBridge();")
+replace("    if (name) selectTab(name);", "    if (name) selectTab(name);\n    if (name === 'settings' && ui('provider').value === 'codex') void checkLocalBridge();")
+replace("    for (const view of all(shadow, '.view')) view.hidden = view.dataset.view !== name;", "    for (const view of all(shadow, '.view')) view.hidden = view.dataset.view !== name;\n    if (name === 'settings' && ui('provider').value === 'codex') void checkLocalBridge();")
+replace("    if (name === 'settings' && ui('provider').value === 'codex') void checkLocalBridge();\n  }\n\n  function syncInputs", "  }\n\n  function syncInputs")
+replace("本地 Codex：先启动 bridge.mjs，将终端显示的本地连接密钥填入 Key，获取模型后保存。", "本地 Codex：使用上方按钮启动桥接，填入本地连接密钥，获取模型后保存。首次使用需注册本地启动器。")
 # Separate open-ended prose from blanks through detection, prompting, validation and writing.
 replace("    if (/填空|简答|论述/.test(attr)) return 'blank';", "    if (/简答|论述|问答|解答|名词解释|分析题|计算题/.test(attr)) return 'essay';\n    if (/填空/.test(attr)) return 'blank';")
 replace("      if (/填空|简答|论述/.test(marker)) return 'blank';", "      if (/简答|论述|问答|解答|名词解释|分析题|计算题/.test(marker)) return 'essay';\n      if (/填空/.test(marker)) return 'blank';")

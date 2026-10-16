@@ -64,6 +64,10 @@ test('HTTP authentication, origins, routing, payload limits, and compatible resp
   });
   try {
     assert.equal((await request('/v1/models', { headers: { Authorization: '' } })).status, 401);
+    assert.equal((await request('/health', { headers: { Authorization: '' } })).status, 401);
+    const health = await request('/health');
+    assert.equal(health.status, 200);
+    assert.equal((await health.json()).service, 'byj-codex-bridge');
     assert.equal((await request('/v1/models', { headers: { Host: 'evil.test' } })).status, 403);
     assert.equal((await request('/v1/models', { headers: { Origin: 'https://evil.test' } })).status, 403);
     assert.equal((await request('/nope')).status, 404);

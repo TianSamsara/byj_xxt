@@ -71,3 +71,57 @@ test('reasoning picker follows supported efforts and saved selection', () => {
   node('model').value = 'other'; c.renderReasoningOptions(); assert.equal(node('reasoning-effort').disabled, true);
   node('provider').value = 'openai'; c.renderReasoningOptions(); assert.equal(node('reasoning-field').hidden, true);
 });
+
+function bridgeContext(states = ['ready']) {
+  const nodes = new Map();
+  const node = id => { if (!nodes.has(id)) nodes.set(id, { value: '', disabled: false, textContent: '' }); return nodes.get(id); };
+  node('provider').value = 'codex'; node('endpoint').value = 'http://127.0.0.1:17653/v1/chat/completions'; node('key').value = 'local-secret';
+  const requests = [], links = [], messages = [];
+  let models = 0;
+  const c = vm.createContext({ ui: node, providers: { codex: { endpoint: node('endpoint').value } },
+    sleep: async () => {}, log: message => messages.push(message), fetchModels: async () => { models++; },
+    document: { documentElement: { appendChild() {} }, createElement: () => { const link = { click() { links.push(this.href); }, remove() {} }; return link; } },
+    GM_xmlhttpRequest: request => {
+      requests.push(request);
+      const state = states.shift() || 'ready';
+      if (state === 'pending') return;
+      if (state === 'offline') return request.onerror();
+      request.onload({ status: state === 'unauthorized' ? 401 : 200, responseText: JSON.stringify({ service: 'byj-codex-bridge' }) });
+    }
+  });
+  const start = source.indexOf('  let bridgeCheckGeneration =');
+  const end = source.indexOf('  function chooseProvider(', start);
+  vm.runInContext(source.slice(start, end), c);
+  return { c, node, requests, links, messages, get models() { return models; } };
+}
+
+test('startup link carries no key and waits for readiness before loading models', async () => {
+  const f = bridgeContext(['offline', 'ready']);
+  f.c.startLocalBridge();
+  assert.deepEqual(f.links, ['byj-codex://start']);
+  assert.equal(f.node('start-bridge').disabled, true);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.node('bridge-status').textContent, '桥接已连接');
+  assert.equal(f.node('start-bridge').disabled, false);
+  assert.equal(f.models, 1);
+  assert.ok(f.requests.every(request => request.url === 'http://127.0.0.1:17653/health'));
+  assert.equal(f.requests[0].headers.Authorization, 'Bearer local-secret');
+});
+
+test('health detects a running bridge with a wrong or missing key without loading models', async () => {
+  const f = bridgeContext(['unauthorized']);
+  f.node('key').value = '';
+  assert.equal(await f.c.checkLocalBridge(false, true), 'unauthorized');
+  assert.match(f.node('bridge-status').textContent, /正确的本地连接密钥/);
+  assert.equal(f.models, 0);
+});
+
+test('an old health response cannot apply after the connection key changes', async () => {
+  const f = bridgeContext(['pending']);
+  const operation = f.c.checkLocalBridge(false, true);
+  f.node('key').value = 'new-secret';
+  f.requests[0].onload({ status: 200, responseText: JSON.stringify({ service: 'byj-codex-bridge' }) });
+  await operation;
+  assert.equal(f.models, 0);
+  assert.notEqual(f.node('bridge-status').textContent, '桥接已连接');
+});

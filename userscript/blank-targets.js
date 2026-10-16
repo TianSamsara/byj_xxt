@@ -6,7 +6,9 @@
     const editorShell = node => node?.closest?.('.edui-editor,.edui-container');
     const sameNode = (a, b) => a === b || Boolean(a?.isSameNode?.(b));
     const cover = nodes => { for (const node of nodes) covered.add(node); };
-    const isCovered = node => [...covered].some(root => root === node || root.contains(node));
+    // 学习通的 .eidtDiv / .textDIV 可以包住整个 UEditor；祖先包装与编辑器内部均不是第二个答题区。
+    const isCovered = node => [...covered].some(root => sameNode(root, node) || root.contains(node) ||
+      (node.matches('.eidtDiv,.textDIV,[contenteditable="true"]') && node.contains(root)));
     for (const root of roots) {
       // 两个注册表可以同时存在，不能因其中一个为空就漏掉另一个。
       let registries;
