@@ -70,6 +70,17 @@ test('network capability checks reject an old bridge before making model request
   };
   await c.ensureLocalWebSearch('http://127.0.0.1:17653/v1/chat/completions', 'secret');
 });
+test('successful capability checks cache briefly and never cross connection keys', async () => {
+  let requests = 0;
+  const c = vm.createContext({ URL, GM_xmlhttpRequest: request => { requests++; request.onload({ status: 200, responseText: '{"service":"byj-codex-bridge","capabilities":{"web_search":true}}' }); } });
+  load(c, 'ensureLocalWebSearch', 'async function askAI(');
+  const endpoint = 'http://127.0.0.1:17653/v1/chat/completions';
+  await c.ensureLocalWebSearch(endpoint, 'first'); await c.ensureLocalWebSearch(endpoint, 'first');
+  assert.equal(requests, 1);
+  await c.ensureLocalWebSearch(endpoint, 'second'); assert.equal(requests, 2);
+  c.ensureLocalWebSearch.cached.expires = 0;
+  await c.ensureLocalWebSearch(endpoint, 'second'); assert.equal(requests, 3);
+});
 test('only local Codex requests carry the saved web search setting', async () => {
   const requests = [];
   const c = vm.createContext({

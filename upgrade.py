@@ -9,7 +9,7 @@ def replace(old, new):
     s = s.replace(old, new)
 
 replace('// @namespace    https://github.com/local/xxt-assistant', '// @namespace    https://github.com/TianSamsara/byj_xxt')
-replace('// @version      0.13.2', '// @version      0.14.7')
+replace('// @version      0.13.2', '// @version      0.14.8')
 replace('// @description  学习通页面内控制面板：', '// @description  支持本地 Codex 登录、模型与思考强度选择；学习通页面内控制面板：')
 # Only this repository supplies updates; the upstream Greasy Fork copy remains unchanged.
 s = '\n'.join(line for line in s.split('\n') if not line.startswith(('// @downloadURL', '// @updateURL')))
@@ -89,7 +89,7 @@ replace("  function chooseProvider() {", """  function renderReasoningOptions(se
     }
     select.value = options.some(entry => entry.reasoningEffort === selected) ? selected : '';
     select.disabled = !options.length;
-    ui('reasoning-hint').textContent = !options.length ? '请重新获取模型以加载支持的思考档位；未提供档位时使用模型默认。' : '档位由本机 Codex 返回；较高强度通常需要更长等待并消耗更多额度。更改后点击保存设置。';
+    ui('reasoning-hint').textContent = !options.length ? '请重新获取模型以加载支持的思考档位；未提供档位时使用模型默认。' : '常规题可选低（low）以缩短等待；较高强度通常需要更长等待并消耗更多额度。档位由本机 Codex 返回，更改后点击保存设置。';
   }
 
   function chooseProvider() {""")
@@ -103,6 +103,7 @@ replace("          ...(settings.provider === 'codex' && settings.reasoningEffort
 replace("  async function askAI(item) {", Path('userscript/web-search.js').read_text(encoding='utf-8') + '\n  async function askAI(item) {')
 replace("    const wantImages = Boolean(answerConfig()", "    if (settings.provider === 'codex' && settings.codexWebSearch === true) await ensureLocalWebSearch(url, settings.key);\n    const wantImages = Boolean(answerConfig()")
 replace("            if (body.choices?.[0]?.finish_reason", "            if (body.web_search?.requests > 0) log(`本题 Codex 发起 ${body.web_search.requests} 次网页检索/查阅，请核对答案中的来源。`);\n            if (body.choices?.[0]?.finish_reason")
+replace("            if (body.web_search?.requests > 0)", "            if (connection.provider === 'codex' && body.bridge_timing) {\n              const timing = body.bridge_timing;\n              log(`本题 Codex 用时 ${(timing.total_ms / 1000).toFixed(1)} 秒：准备 ${(Math.max(0, timing.total_ms - timing.inference_ms) / 1000).toFixed(1)} 秒，模型/检索 ${(timing.inference_ms / 1000).toFixed(1)} 秒${timing.reused_process ? '（复用连接）' : '（首次启动）'}`);\n            }\n            if (body.web_search?.requests > 0)")
 replace('    .panel[hidden]{display:none}', '    .panel[hidden],#reasoning-field[hidden],#reasoning-hint[hidden],#web-search-field[hidden]{display:none}')
 # Windows 启动器只注册一次；日常从面板发起启动，再检测健康状态和获取模型。
 replace('            <label class="field">API 地址', '''            <div class="settings-card" id="local-bridge" hidden>
@@ -129,7 +130,7 @@ replace("    return 'blank';\n  }\n\n  function getOptionElements", "    // 无�
 replace("  const ANSWER_PROMPT_REVISION = 'accuracy-v2-context';", "  const ANSWER_PROMPT_REVISION = 'accuracy-v4-web-search';")
 replace("  function buildAnswerPrompt(item, imageCount) {", "  function buildAnswerPrompt(item, imageCount, connection = settings) {")
 replace("    return `请解答下面这一道题。", """    const searchRule = connection.provider === 'codex' ? (connection.codexWebSearch === true
-      ? '本次允许使用内置网页搜索。题目明确要求上网检索、对比来源或信息需要查证时，先实际检索和查阅资料，再完成答案；按题目要求的来源数量核对。简答/论述题在 answer 正文列出来源标题与完整 https 链接；选择、判断和填空题的 answer 必须严格保持题型规定的格式，来源可另列于顶层 sources 数组，不能附在选项字母或填空内容中。不要把检索进度写入 JSON，不要用内部引用标记代替链接。'
+      ? '本次允许使用内置网页搜索，但普通且稳定的知识题直接作答，不为增加来源而检索。题目明确要求上网检索、对比来源或信息需要查证时，先实际检索和查阅资料，再完成答案；按题目要求的来源数量核对，资料充分后及时作答，避免重复查询。简答/论述题在 answer 正文列出来源标题与完整 https 链接；选择、判断和填空题的 answer 必须严格保持题型规定的格式，来源可另列于顶层 sources 数组，不能附在选项字母或填空内容中。不要把检索进度写入 JSON，不要用内部引用标记代替链接。'
       : '本次网页搜索已关闭。普通知识题可依已有知识回答，不要自行附加上网检索或至少两个来源的要求；题目明确要求实际检索且资料不足时，返回 needs_review 并提示开启 AI 连接中的联网检索。')
       : '是否可检索取决于当前服务商实际能力；不要声称执行过未发生的搜索。';
     return `请解答下面这一道题。\\n${searchRule}""")

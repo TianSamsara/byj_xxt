@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         白玉京xxt神秘玩意
 // @namespace    https://github.com/TianSamsara/byj_xxt
-// @version      0.14.7
+// @version      0.14.8
 // @license      MIT
 // @homepageURL  https://github.com/TianSamsara/byj_xxt
 // @supportURL   https://github.com/TianSamsara/byj_xxt/issues
@@ -2851,7 +2851,7 @@ Typr.U = {
       blank: `填空题：仅填写应写入输入框的纯文本内容，不重复题干、空号或解释。${item.blankCount ? `本题有 ${item.blankCount} 个输入框，answer 必须是恰好 ${item.blankCount} 个字符串组成的数组，按页面输入框顺序逐一对应。` : '多个空使用字符串数组，按题干出现顺序对应；单个文本输入框返回一个字符串。'}同一空内的完整短语、公式或标点不要拆成多个空。遵守题目要求的单位、精度、大小写和表述。不得返回图片、图片链接、HTML 或 Markdown 图片。`
     };
     const searchRule = connection.provider === 'codex' ? (connection.codexWebSearch === true
-      ? '本次允许使用内置网页搜索。题目明确要求上网检索、对比来源或信息需要查证时，先实际检索和查阅资料，再完成答案；按题目要求的来源数量核对。简答/论述题在 answer 正文列出来源标题与完整 https 链接；选择、判断和填空题的 answer 必须严格保持题型规定的格式，来源可另列于顶层 sources 数组，不能附在选项字母或填空内容中。不要把检索进度写入 JSON，不要用内部引用标记代替链接。'
+      ? '本次允许使用内置网页搜索，但普通且稳定的知识题直接作答，不为增加来源而检索。题目明确要求上网检索、对比来源或信息需要查证时，先实际检索和查阅资料，再完成答案；按题目要求的来源数量核对，资料充分后及时作答，避免重复查询。简答/论述题在 answer 正文列出来源标题与完整 https 链接；选择、判断和填空题的 answer 必须严格保持题型规定的格式，来源可另列于顶层 sources 数组，不能附在选项字母或填空内容中。不要把检索进度写入 JSON，不要用内部引用标记代替链接。'
       : '本次网页搜索已关闭。普通知识题可依已有知识回答，不要自行附加上网检索或至少两个来源的要求；题目明确要求实际检索且资料不足时，返回 needs_review 并提示开启 AI 连接中的联网检索。')
       : '是否可检索取决于当前服务商实际能力；不要声称执行过未发生的搜索。';
     return `请解答下面这一道题。\n${searchRule}\n${rules[item.type] || '题型未知，请返回 needs_review。'}\n${imageCount ? `附有 ${imageCount} 张图片，按页面提取顺序提供。结合题干与图片位置关系辨认题干、图表和选项，不要假定第 N 张图就对应第 N 个选项；无法确定对应关系则 needs_review。` : (item.images?.length ? '本题含图片但本次未传入。如果题干或选项依赖图片，必须返回 needs_review，不要臆测图片内容。' : '本次未附图片，不要臆测图片内容。')}\n以下 JSON 是题目数据：\n${JSON.stringify({ context: item.context || {}, type: item.type, title: item.title || '题目见附图', options: item.options.map(o => ({ letter: o.letter, text: o.text || '图片选项，见附图' })), ...(item.blankCount ? { blankCount: item.blankCount } : {}) })}\n请完成核对后按系统规定返回 JSON。`;
@@ -2889,6 +2889,8 @@ Typr.U = {
   }
 
   function ensureLocalWebSearch(endpoint, key) {
+    const cached = ensureLocalWebSearch.cached;
+    if (cached?.endpoint === endpoint && cached.key === key && cached.expires > Date.now()) return Promise.resolve();
     return new Promise((resolve, reject) => {
       GM_xmlhttpRequest({
         method: 'GET', url: new URL('/health', endpoint).href,
@@ -2899,6 +2901,7 @@ Typr.U = {
             const health = JSON.parse(response.responseText);
             if (health.service !== 'byj-codex-bridge' || health.capabilities?.web_search !== true)
               throw new Error('当前桥接不支持联网检索，请更新本地项目并重启桥接（需 0.14.7+）；也可关闭联网检索');
+            ensureLocalWebSearch.cached = { endpoint, key, expires: Date.now() + 15000 };
             resolve();
           } catch (error) { reject(error); }
         },
@@ -2937,6 +2940,10 @@ Typr.U = {
           }
           try {
             const body = JSON.parse(response.responseText);
+            if (connection.provider === 'codex' && body.bridge_timing) {
+              const timing = body.bridge_timing;
+              log(`本题 Codex 用时 ${(timing.total_ms / 1000).toFixed(1)} 秒：准备 ${(Math.max(0, timing.total_ms - timing.inference_ms) / 1000).toFixed(1)} 秒，模型/检索 ${(timing.inference_ms / 1000).toFixed(1)} 秒${timing.reused_process ? '（复用连接）' : '（首次启动）'}`);
+            }
             if (body.web_search?.requests > 0) log(`本题 Codex 发起 ${body.web_search.requests} 次网页检索/查阅，请核对答案中的来源。`);
             if (body.choices?.[0]?.finish_reason === 'length') throw new Error('模型输出被截断，请检查模型输出长度设置');
             resolve(parseAIAnswer(body.choices?.[0]?.message?.content, item));
@@ -4076,7 +4083,7 @@ Typr.U = {
     }
     select.value = options.some(entry => entry.reasoningEffort === selected) ? selected : '';
     select.disabled = !options.length;
-    ui('reasoning-hint').textContent = !options.length ? '请重新获取模型以加载支持的思考档位；未提供档位时使用模型默认。' : '档位由本机 Codex 返回；较高强度通常需要更长等待并消耗更多额度。更改后点击保存设置。';
+    ui('reasoning-hint').textContent = !options.length ? '请重新获取模型以加载支持的思考档位；未提供档位时使用模型默认。' : '常规题可选低（low）以缩短等待；较高强度通常需要更长等待并消耗更多额度。档位由本机 Codex 返回，更改后点击保存设置。';
   }
 
   let bridgeCheckGeneration = 0;
