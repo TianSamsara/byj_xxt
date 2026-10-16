@@ -116,6 +116,29 @@ test('health detects a running bridge with a wrong or missing key without loadin
   assert.equal(f.models, 0);
 });
 
+test('a first-time user with no key can request native clipboard copying without exposing the key in a URL', async () => {
+  const f = bridgeContext(['unauthorized']);
+  f.node('key').value = '';
+  f.c.startLocalBridge();
+  assert.equal(f.node('copy-local-key').disabled, true);
+  f.c.startLocalBridge();
+  assert.deepEqual(f.links, ['byj-codex://start']);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.node('copy-local-key').disabled, false);
+  assert.equal(f.node('key').value, '');
+  assert.equal(f.models, 0);
+  assert.match(f.node('bridge-status').textContent, /Ctrl\+V/);
+  assert.match(f.messages[0], /复制密钥/);
+});
+
+test('native clipboard copying is unavailable for other providers', () => {
+  const f = bridgeContext();
+  f.node('provider').value = 'openai';
+  f.c.startLocalBridge();
+  assert.equal(f.links.length, 0);
+  assert.equal(f.requests.length, 0);
+});
+
 test('an old health response cannot apply after the connection key changes', async () => {
   const f = bridgeContext(['pending']);
   const operation = f.c.checkLocalBridge(false, true);

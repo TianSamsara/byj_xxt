@@ -1,8 +1,12 @@
 // ==UserScript==
 // @name         白玉京xxt神秘玩意
 // @namespace    https://github.com/TianSamsara/byj_xxt
-// @version      0.14.3
+// @version      0.14.4
 // @license      MIT
+// @homepageURL  https://github.com/TianSamsara/byj_xxt
+// @supportURL   https://github.com/TianSamsara/byj_xxt/issues
+// @updateURL    https://raw.githubusercontent.com/TianSamsara/byj_xxt/main/byj.meta.js
+// @downloadURL  https://raw.githubusercontent.com/TianSamsara/byj_xxt/main/byj.user.js
 // @description  支持本地 Codex 登录、模型与思考强度选择；学习通页面内控制面板：AI 逐题填答与自动提交（先查共享题库，命中免 AI）、刷课自动作答、加密字体还原、图片题视觉作答、视频连播与任务点自动跳转、倍速隐身、后台挂机保活
 // @match        *://chaoxing.com/*
 // @match        *://*.chaoxing.com/*
@@ -3652,7 +3656,7 @@ Typr.U = {
     .launcher{position:fixed;right:22px;bottom:22px;z-index:2147483647;width:54px;height:54px;border:0;border-radius:18px;background:#2458d3;color:white;box-shadow:0 10px 30px #173b8b44;font-size:23px;cursor:pointer;transition:transform 150ms cubic-bezier(.23,1,.32,1)}
     button:active{transform:scale(.97)}
     .panel{position:fixed;right:22px;bottom:88px;z-index:2147483647;width:min(460px,calc(100vw - 32px));max-height:min(700px,calc(100vh - 106px));display:flex;flex-direction:column;background:#fff;border:1px solid #d9e2f1;border-radius:20px;box-shadow:0 20px 70px #1f315533;overflow:hidden}
-    .panel[hidden],#reasoning-field[hidden],#reasoning-hint[hidden],#local-bridge[hidden]{display:none}
+    .panel[hidden],#reasoning-field[hidden],#reasoning-hint[hidden],#local-bridge[hidden],#copy-key-row[hidden]{display:none}
     header{padding:18px 18px 14px;background:linear-gradient(145deg,#f2f6ff,#fff);border-bottom:1px solid #e9eef6;cursor:move;user-select:none}
     .title{display:flex;align-items:center;justify-content:space-between;font-weight:750;font-size:17px}
     .subtitle{color:#627086;font-size:12px;margin-top:4px}
@@ -3755,16 +3759,17 @@ Typr.U = {
             <div class="settings-card" id="local-bridge" hidden>
               <b>本地桥接</b><p class="hint" id="bridge-status" role="status" aria-live="polite">点击检测连接，或启动本地桥接。</p>
               <div class="row"><button class="action secondary" id="start-bridge">启动本地桥接</button><button class="action secondary" id="check-bridge">检测连接</button></div>
-              <p class="hint">首次使用：在项目目录运行 install-bridge-launcher.ps1 注册 Windows 启动器。以后可在这里启动；浏览器提示时允许打开。启动后自动获取模型，原连接密钥继续使用。</p>
+              <p class="hint">首次使用：在项目目录运行 install-bridge-launcher.ps1 注册 Windows 启动器。点击启动后，启动器自动复制本地密钥；浏览器提示时允许打开，再在密钥框按 Ctrl+V 粘贴。已配置密钥时自动获取模型。</p>
             </div>
             <label class="field">API 地址<input class="field" id="endpoint" type="url" placeholder="https://.../chat/completions"></label>
             <label class="field">API Key / 本地连接密钥<input class="field" id="key" type="password" autocomplete="off"></label>
+            <div class="row" id="copy-key-row" hidden><button class="action secondary" id="copy-local-key">复制本地密钥</button></div>
             <label class="field">模型<select class="field" id="model" aria-label="选择模型"></select></label>
             <label class="field" id="reasoning-field" hidden>思考强度<select class="field" id="reasoning-effort" aria-label="选择思考强度"></select></label>
             <p class="hint" id="reasoning-hint" hidden></p>
             <div class="row"><button class="action secondary" id="get-models">获取模型</button></div>
             <div class="row"><button class="action" id="save">保存设置</button></div>
-            <p class="hint">本地 Codex：使用上方按钮启动桥接，填入本地连接密钥，获取模型后保存。首次使用需注册本地启动器。仅打开 Codex 窗口还不够；需要本机 Codex CLI 的 ChatGPT 登录状态。本地密钥不是 OpenAI API Key。Key 保存在油猴本地存储；答题前请确认接口可信。答案由 AI 生成，提交前建议检查。</p>
+            <p class="hint">本地 Codex：点击启动或复制密钥，启动器会把密钥复制到剪贴板。在 Key 框按 Ctrl+V 粘贴，获取模型后保存。首次使用需注册本地启动器。仅打开 Codex 窗口还不够；需要本机 Codex CLI 的 ChatGPT 登录状态。本地密钥不是 OpenAI API Key。Key 保存在油猴本地存储；答题前请确认接口可信。答案由 AI 生成，提交前建议检查。</p>
           </div>
         </div>
         <div class="log" id="log"></div>
@@ -3793,6 +3798,7 @@ Typr.U = {
     };
     ui('get-models').onclick = fetchModels;
     ui('start-bridge').onclick = startLocalBridge;
+    ui('copy-local-key').onclick = startLocalBridge;
     ui('check-bridge').onclick = () => checkLocalBridge();
     ui('provider').onchange = chooseProvider;
     ui('model').onchange = () => renderReasoningOptions('');
@@ -3987,6 +3993,7 @@ Typr.U = {
   function renderReasoningOptions(selected = settings.model === ui('model').value ? settings.reasoningEffort || '' : '') {
     const isCodex = ui('provider').value === 'codex';
     ui('local-bridge').hidden = !isCodex;
+    ui('copy-key-row').hidden = !isCodex;
     ui('reasoning-field').hidden = !isCodex;
     ui('reasoning-hint').hidden = !isCodex;
     const select = ui('reasoning-effort');
@@ -4044,7 +4051,7 @@ Typr.U = {
     } while (current());
     if (!current()) return;
     const messages = {
-      ready: '桥接已连接', unauthorized: '桥接已运行，请填写正确的本地连接密钥',
+      ready: '桥接已连接', unauthorized: '桥接已运行，请填写正确的本地连接密钥；可点击“复制本地密钥”，允许打开启动器后按 Ctrl+V 粘贴',
       incompatible: '检测到旧版桥接或其他服务，请先停止旧服务并启动新版桥接',
       offline: wait ? '未连接。请允许浏览器打开本地启动器；首次使用需先运行 install-bridge-launcher.ps1。' : '桥接未连接，可点击“启动本地桥接”。'
     };
@@ -4058,16 +4065,19 @@ Typr.U = {
     if (bridgeStarting || ui('provider').value !== 'codex') return;
     bridgeStarting = true;
     ui('start-bridge').disabled = true;
+    ui('copy-local-key').disabled = true;
     // 必须在用户点击的同步调用中触发协议；URI 不含密钥、参数或可执行命令。
     try {
       const link = document.createElement('a');
       link.href = 'byj-codex://start';
       document.documentElement.appendChild(link);
       try { link.click(); } finally { link.remove(); }
-      log('已请求启动本地桥接；如浏览器询问，请允许打开本地启动器');
-      void checkLocalBridge(true, true).finally(() => { bridgeStarting = false; ui('start-bridge').disabled = false; });
+      log('已请求本地启动器启动桥接并复制密钥；如浏览器询问，请允许打开，完成后在密钥框按 Ctrl+V 粘贴');
+      void checkLocalBridge(true, true).catch(() => {
+        log('连接检测失败，可稍后点击“检测连接”重试');
+      }).finally(() => { bridgeStarting = false; ui('start-bridge').disabled = false; ui('copy-local-key').disabled = false; });
     } catch {
-      bridgeStarting = false; ui('start-bridge').disabled = false;
+      bridgeStarting = false; ui('start-bridge').disabled = false; ui('copy-local-key').disabled = false;
       ui('bridge-status').textContent = '无法打开本地启动器，请先运行 install-bridge-launcher.ps1 或手动运行 start-bridge.ps1。';
     }
   }
@@ -4078,7 +4088,7 @@ Typr.U = {
     ui('endpoint').value = preset.endpoint;
     renderModelOptions(preset.models, preset.model);
     ui('key').value = '';
-    log(ui('provider').value === 'codex' ? '请先启动本地桥接，填写终端显示的本地连接密钥，然后获取模型' : `已选择 ${preset.label}，请填写该服务商的 API Key`);
+    log(ui('provider').value === 'codex' ? '点击启动本地桥接或复制本地密钥，允许打开启动器后，在密钥框按 Ctrl+V 粘贴，再获取模型' : `已选择 ${preset.label}，请填写该服务商的 API Key`);
   }
   async function fetchModels() {
     const button = ui('get-models');

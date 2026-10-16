@@ -1,4 +1,4 @@
-﻿param([switch]$Background)
+﻿param([switch]$Background, [switch]$CopyKey)
 
 $ErrorActionPreference = 'Stop'
 $bridgeRoot = $PSScriptRoot
@@ -7,7 +7,23 @@ $workDirectory = Join-Path $bridgeRoot '.bridge-work'
 $launcherConfig = Join-Path $workDirectory 'launcher.json'
 $launcherMutex = New-Object System.Threading.Mutex($false, 'Local\ByjCodexBridgeLauncher')
 $launcherLock = $false
+function Copy-LocalBridgeKey {
+    if (-not $CopyKey) { return }
+    $localKey = (Get-Content -LiteralPath (Join-Path $bridgeRoot '.bridge-token') -Raw).Trim()
+    if ($localKey -notmatch '^[a-f0-9]{64}$') { Write-Warning '密钥文件格式异常，未复制。'; return }
+    for ($copyAttempt = 0; $copyAttempt -lt 5; $copyAttempt++) {
+        try {
+            Set-Clipboard -Value $localKey -ErrorAction Stop
+            Write-Output '本地连接密钥已复制到剪贴板，请在脚本的密钥输入框按 Ctrl+V 粘贴。'
+            return
+        } catch {
+            if ($copyAttempt -eq 4) { Write-Warning '剪贴板暂时不可用，请稍后点击“复制本地密钥”重试。' }
+            else { Start-Sleep -Milliseconds 150 }
+        }
+    }
+}
 try {
+    if ($CopyKey -and -not $Background) { throw '复制密钥请同时使用 -Background 和 -CopyKey。' }
     try { $launcherLock = $launcherMutex.WaitOne(0) } catch [System.Threading.AbandonedMutexException] { $launcherLock = $true }
     if (-not $launcherLock) { Write-Output '另一个桥接启动请求正在处理。'; return }
     if (Test-Path -LiteralPath $launcherConfig) {
@@ -37,6 +53,7 @@ try {
         $health = Invoke-RestMethod -Uri 'http://127.0.0.1:17653/health' -Headers @{ Authorization = "Bearer $token" } -TimeoutSec 3
         if ($health.service -ne 'byj-codex-bridge') { throw '桥接状态异常。' }
         Write-Output '桥接已在运行，无需重复启动。'
+        Copy-LocalBridgeKey
         return
     }
     if (-not $Background) {
@@ -53,7 +70,7 @@ try {
         try {
             $token = (Get-Content -LiteralPath (Join-Path $bridgeRoot '.bridge-token') -Raw).Trim()
             $health = Invoke-RestMethod -Uri 'http://127.0.0.1:17653/health' -Headers @{ Authorization = "Bearer $token" } -TimeoutSec 1
-            if ($health.service -eq 'byj-codex-bridge') { Write-Output "桥接已在后台启动（PID $($child.Id)）。"; return }
+            if ($health.service -eq 'byj-codex-bridge') { Write-Output "桥接已在后台启动（PID $($child.Id)）。"; Copy-LocalBridgeKey; return }
         } catch { if ($attempt -eq 29) { throw '桥接启动超时，请检查 .bridge-work 中的日志。' } }
     }
 } finally {

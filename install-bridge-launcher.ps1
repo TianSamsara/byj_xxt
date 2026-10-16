@@ -24,7 +24,7 @@ New-Item -ItemType Directory -Path $workDirectory -Force | Out-Null
 @{ node = $nodeBinary; codex = $codexBinary } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $workDirectory 'launcher.json') -Encoding UTF8
 $powershellBinary = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 # No %1 substitution: links can only start this project's bridge, never supply commands or secrets.
-$launchCommand = '"{0}" -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "{1}" -Background' -f $powershellBinary, $launchScript
+$launchCommand = '"{0}" -NoProfile -NonInteractive -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File "{1}" -Background -CopyKey' -f $powershellBinary, $launchScript
 New-Item -Path "$protocolKey\shell\open\command" -Force | Out-Null
 Set-Item -LiteralPath $protocolKey -Value 'URL:BYJ Local Codex Bridge'
 New-ItemProperty -LiteralPath $protocolKey -Name 'URL Protocol' -Value '' -PropertyType String -Force | Out-Null

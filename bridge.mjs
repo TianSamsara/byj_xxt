@@ -71,7 +71,7 @@ export class Codex {
     return new Promise((resolve, reject) => { const id = ++this.seq; this.pending.set(id, { resolve, reject }); this.child.stdin.write(JSON.stringify({ id, method, params }) + '\n'); });
   }
   async init() {
-    await this.rpc('initialize', { clientInfo: { name: 'byj_local_bridge', title: '白玉京本地桥接', version: '0.14.3' } });
+    await this.rpc('initialize', { clientInfo: { name: 'byj_local_bridge', title: '白玉京本地桥接', version: '0.14.4' } });
     this.child.stdin.write('{"method":"initialized"}\n');
   }
   close() { this.child.kill(); this.fail(new Error('请求已结束')); }
@@ -125,7 +125,7 @@ export function createBridge({ token, binary, cwd = root, Client = Codex }) {
     }
     const supplied = Buffer.from(req.headers.authorization || ''); const expected = Buffer.from(`Bearer ${token}`);
     if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) return send(401, { error: '本地连接密钥错误' });
-    if (req.method === 'GET' && req.url === '/health') return send(200, { service: 'byj-codex-bridge', version: '0.14.3' });
+    if (req.method === 'GET' && req.url === '/health') return send(200, { service: 'byj-codex-bridge', version: '0.14.4' });
     const isModels = req.method === 'GET' && req.url === '/v1/models';
     const isAnswer = req.method === 'POST' && req.url === '/v1/chat/completions';
     if (!isModels && !isAnswer) return send(404, { error: '接口不存在' });
