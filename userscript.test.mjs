@@ -76,10 +76,13 @@ function bridgeContext(states = ['ready']) {
   const nodes = new Map();
   const node = id => { if (!nodes.has(id)) nodes.set(id, { value: '', disabled: false, textContent: '' }); return nodes.get(id); };
   node('provider').value = 'codex'; node('endpoint').value = 'http://127.0.0.1:17653/v1/chat/completions'; node('key').value = 'local-secret';
-  const requests = [], links = [], messages = [];
+  const requests = [], links = [], messages = [], clipboard = [], openedPages = [];
   let models = 0;
   const c = vm.createContext({ ui: node, providers: { codex: { endpoint: node('endpoint').value } },
-    sleep: async () => {}, log: message => messages.push(message), fetchModels: async () => { models++; },
+    sleep: async () => {}, log: message => messages.push(message), toast: message => messages.push(message), fetchModels: async () => { models++; },
+    setTimeout, clearTimeout,
+    GM_setClipboard: (value, _info, callback) => { clipboard.push(value); callback(); },
+    GM_openInTab: (url, options) => openedPages.push({ url, ...options }),
     document: { documentElement: { appendChild() {} }, createElement: () => { const link = { click() { links.push(this.href); }, remove() {} }; return link; } },
     GM_xmlhttpRequest: request => {
       requests.push(request);
@@ -92,7 +95,7 @@ function bridgeContext(states = ['ready']) {
   const start = source.indexOf('  let bridgeCheckGeneration =');
   const end = source.indexOf('  function chooseProvider(', start);
   vm.runInContext(source.slice(start, end), c);
-  return { c, node, requests, links, messages, get models() { return models; } };
+  return { c, node, requests, links, messages, clipboard, openedPages, get models() { return models; } };
 }
 
 test('startup link carries no key and waits for readiness before loading models', async () => {
@@ -116,27 +119,52 @@ test('health detects a running bridge with a wrong or missing key without loadin
   assert.equal(f.models, 0);
 });
 
-test('a first-time user with no key can request native clipboard copying without exposing the key in a URL', async () => {
+test('an empty key opens the local setup page without launching a protocol or leaking a key in its URL', () => {
   const f = bridgeContext(['unauthorized']);
   f.node('key').value = '';
-  f.c.startLocalBridge();
-  assert.equal(f.node('copy-local-key').disabled, true);
-  f.c.startLocalBridge();
-  assert.deepEqual(f.links, ['byj-codex://start']);
-  await new Promise(resolve => setImmediate(resolve));
-  assert.equal(f.node('copy-local-key').disabled, false);
+  f.c.copyLocalBridgeKey();
+  assert.equal(f.links.length, 0);
+  assert.equal(f.requests.length, 0);
+  assert.equal(f.clipboard.length, 0);
+  assert.equal(f.openedPages.length, 1);
+  assert.equal(f.openedPages[0].url, 'http://127.0.0.1:17653/setup');
+  assert.equal(f.openedPages[0].active, true);
   assert.equal(f.node('key').value, '');
-  assert.equal(f.models, 0);
-  assert.match(f.node('bridge-status').textContent, /Ctrl\+V/);
-  assert.match(f.messages[0], /复制密钥/);
 });
 
-test('native clipboard copying is unavailable for other providers', () => {
+test('a configured key copies through Tampermonkey and only reports success after the clipboard callback', () => {
+  const f = bridgeContext();
+  let callback;
+  f.c.GM_setClipboard = (value, _info, done) => { f.clipboard.push(value); callback = done; };
+  f.c.copyLocalBridgeKey();
+  assert.equal(f.node('copy-local-key').disabled, true);
+  assert.deepEqual(f.clipboard, ['local-secret']);
+  assert.equal(f.messages.length, 0);
+  callback();
+  assert.equal(f.node('copy-local-key').disabled, false);
+  assert.match(f.messages[0], /已复制到剪贴板/);
+  assert.equal(f.openedPages.length, 0);
+  assert.equal(f.links.length, 0);
+});
+
+test('a failing clipboard API falls back to the local setup page without reporting success', () => {
+  const f = bridgeContext();
+  f.c.GM_setClipboard = () => { throw new Error('permission denied'); };
+  f.c.copyLocalBridgeKey();
+  assert.equal(f.node('copy-local-key').disabled, false);
+  assert.equal(f.openedPages.length, 1);
+  assert.equal(f.messages.some(message => /已复制到剪贴板/.test(message)), false);
+});
+
+test('local clipboard copying is unavailable for other providers', () => {
   const f = bridgeContext();
   f.node('provider').value = 'openai';
   f.c.startLocalBridge();
+  f.c.copyLocalBridgeKey();
   assert.equal(f.links.length, 0);
   assert.equal(f.requests.length, 0);
+  assert.equal(f.clipboard.length, 0);
+  assert.equal(f.openedPages.length, 0);
 });
 
 test('an old health response cannot apply after the connection key changes', async () => {

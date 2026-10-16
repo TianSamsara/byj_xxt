@@ -58,13 +58,32 @@ test('HTTP authentication, origins, routing, payload limits, and compatible resp
   const request = (url, options = {}) => new Promise((resolve, reject) => {
     const req = http.request({ hostname: '127.0.0.1', port, path: url, method: options.method || 'GET', headers: { Host: '127.0.0.1:17653', Authorization: 'Bearer test-secret', ...options.headers } }, res => {
       let text = ''; res.setEncoding('utf8'); res.on('data', chunk => text += chunk);
-      res.on('end', () => resolve({ status: res.statusCode, headers: { get: name => res.headers[name.toLowerCase()] }, json: async () => JSON.parse(text) }));
+      res.on('end', () => resolve({ status: res.statusCode, headers: { get: name => res.headers[name.toLowerCase()] }, text: async () => text, json: async () => JSON.parse(text) }));
     });
     req.on('error', reject); req.end(options.body);
   });
   try {
     assert.equal((await request('/v1/models', { headers: { Authorization: '' } })).status, 401);
     assert.equal((await request('/health', { headers: { Authorization: '' } })).status, 401);
+    assert.equal((await request('/setup', { headers: { Authorization: '' } })).status, 403);
+    const navigation = { Authorization: '', 'Sec-Fetch-Mode': 'navigate', 'Sec-Fetch-Dest': 'document' };
+    const setup = await request('/setup', { headers: navigation });
+    assert.equal(setup.status, 200);
+    assert.match(await setup.text(), /复制密钥到剪贴板/);
+    assert.equal(setup.headers.get('Access-Control-Allow-Origin'), undefined);
+    assert.equal(setup.headers.get('Cache-Control'), 'no-store');
+    assert.equal(setup.headers.get('X-Frame-Options'), 'DENY');
+    assert.equal(setup.headers.get('Cross-Origin-Opener-Policy'), 'same-origin');
+    assert.match(setup.headers.get('Content-Security-Policy'), /frame-ancestors 'none'/);
+    for (const forbidden of [
+      { Origin: 'https://mooc1.chaoxing.com' }, { Origin: 'https://evil.test' },
+      { 'Sec-Fetch-Mode': 'cors', 'Sec-Fetch-Dest': 'empty' }, { 'Sec-Fetch-Dest': 'iframe' }
+    ]) {
+      const blocked = await request('/setup', { headers: { ...navigation, ...forbidden } });
+      assert.equal(blocked.status, 403);
+      assert.equal(blocked.headers.get('Access-Control-Allow-Origin'), undefined);
+      assert.equal((await blocked.text()).includes('test-secret'), false);
+    }
     const health = await request('/health');
     assert.equal(health.status, 200);
     assert.equal((await health.json()).service, 'byj-codex-bridge');

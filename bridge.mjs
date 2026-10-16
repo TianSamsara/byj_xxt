@@ -5,6 +5,7 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { setupPage } from './bridge-setup.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 export const MAX_BODY = 12 * 1024 * 1024;
@@ -71,7 +72,7 @@ export class Codex {
     return new Promise((resolve, reject) => { const id = ++this.seq; this.pending.set(id, { resolve, reject }); this.child.stdin.write(JSON.stringify({ id, method, params }) + '\n'); });
   }
   async init() {
-    await this.rpc('initialize', { clientInfo: { name: 'byj_local_bridge', title: '白玉京本地桥接', version: '0.14.4' } });
+    await this.rpc('initialize', { clientInfo: { name: 'byj_local_bridge', title: '白玉京本地桥接', version: '0.14.5' } });
     this.child.stdin.write('{"method":"initialized"}\n');
   }
   close() { this.child.kill(); this.fail(new Error('请求已结束')); }
@@ -116,6 +117,14 @@ export function createBridge({ token, binary, cwd = root, Client = Codex }) {
     const send = (status, value) => { if (!res.destroyed && !res.writableEnded) { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(value)); } };
     if (req.headers.host !== '127.0.0.1:17653') return send(403, { error: 'Host 不允许' });
     const origin = req.headers.origin;
+    // Bootstrap is a top-level local document, never a cross-origin API or embedded frame.
+    // Keep this before CORS headers so learning pages cannot fetch and read the key.
+    if (req.url === '/setup') {
+      if (req.method !== 'GET' || origin || req.headers['sec-fetch-mode'] !== 'navigate' || req.headers['sec-fetch-dest'] !== 'document')
+        return send(403, { error: '请在浏览器新标签页打开本地密钥页' });
+      const page = setupPage(token);
+      res.writeHead(200, page.headers); res.end(page.html); return;
+    }
     if (origin && !allowedOrigin(origin)) return send(403, { error: 'Origin 不允许' });
     if (origin) { res.setHeader('Access-Control-Allow-Origin', origin); res.setHeader('Vary', 'Origin'); }
     if (req.method === 'OPTIONS') {
@@ -125,7 +134,7 @@ export function createBridge({ token, binary, cwd = root, Client = Codex }) {
     }
     const supplied = Buffer.from(req.headers.authorization || ''); const expected = Buffer.from(`Bearer ${token}`);
     if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) return send(401, { error: '本地连接密钥错误' });
-    if (req.method === 'GET' && req.url === '/health') return send(200, { service: 'byj-codex-bridge', version: '0.14.4' });
+    if (req.method === 'GET' && req.url === '/health') return send(200, { service: 'byj-codex-bridge', version: '0.14.5' });
     const isModels = req.method === 'GET' && req.url === '/v1/models';
     const isAnswer = req.method === 'POST' && req.url === '/v1/chat/completions';
     if (!isModels && !isAnswer) return send(404, { error: '接口不存在' });

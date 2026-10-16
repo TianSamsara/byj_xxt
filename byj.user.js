@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         白玉京xxt神秘玩意
 // @namespace    https://github.com/TianSamsara/byj_xxt
-// @version      0.14.4
+// @version      0.14.5
 // @license      MIT
 // @homepageURL  https://github.com/TianSamsara/byj_xxt
 // @supportURL   https://github.com/TianSamsara/byj_xxt/issues
@@ -15,6 +15,8 @@
 // @grant        GM_setValue
 // @grant        GM_xmlhttpRequest
 // @grant        GM_info
+// @grant        GM_setClipboard
+// @grant        GM_openInTab
 // @grant        unsafeWindow
 // @connect      *
 // ==/UserScript==
@@ -3759,7 +3761,7 @@ Typr.U = {
             <div class="settings-card" id="local-bridge" hidden>
               <b>本地桥接</b><p class="hint" id="bridge-status" role="status" aria-live="polite">点击检测连接，或启动本地桥接。</p>
               <div class="row"><button class="action secondary" id="start-bridge">启动本地桥接</button><button class="action secondary" id="check-bridge">检测连接</button></div>
-              <p class="hint">首次使用：在项目目录运行 install-bridge-launcher.ps1 注册 Windows 启动器。点击启动后，启动器自动复制本地密钥；浏览器提示时允许打开，再在密钥框按 Ctrl+V 粘贴。已配置密钥时自动获取模型。</p>
+              <p class="hint">首次使用：运行 install-bridge-launcher.ps1 注册启动器。浏览器未执行自动复制时，点击“复制本地密钥”打开本机密钥页，在新标签页复制后返回粘贴。已填写密钥时可直接复制。</p>
             </div>
             <label class="field">API 地址<input class="field" id="endpoint" type="url" placeholder="https://.../chat/completions"></label>
             <label class="field">API Key / 本地连接密钥<input class="field" id="key" type="password" autocomplete="off"></label>
@@ -3769,7 +3771,7 @@ Typr.U = {
             <p class="hint" id="reasoning-hint" hidden></p>
             <div class="row"><button class="action secondary" id="get-models">获取模型</button></div>
             <div class="row"><button class="action" id="save">保存设置</button></div>
-            <p class="hint">本地 Codex：点击启动或复制密钥，启动器会把密钥复制到剪贴板。在 Key 框按 Ctrl+V 粘贴，获取模型后保存。首次使用需注册本地启动器。仅打开 Codex 窗口还不够；需要本机 Codex CLI 的 ChatGPT 登录状态。本地密钥不是 OpenAI API Key。Key 保存在油猴本地存储；答题前请确认接口可信。答案由 AI 生成，提交前建议检查。</p>
+            <p class="hint">本地 Codex：密钥为空时点击复制按钮打开本机密钥页；已有密钥时由油猴直接复制，成功后会提示。粘贴、获取模型后保存。首次启动需注册本地启动器。仅打开 Codex 窗口还不够；需要本机 Codex CLI 的 ChatGPT 登录状态。本地密钥不是 OpenAI API Key。Key 保存在油猴本地存储；答题前请确认接口可信。答案由 AI 生成，提交前建议检查。</p>
           </div>
         </div>
         <div class="log" id="log"></div>
@@ -3798,7 +3800,7 @@ Typr.U = {
     };
     ui('get-models').onclick = fetchModels;
     ui('start-bridge').onclick = startLocalBridge;
-    ui('copy-local-key').onclick = startLocalBridge;
+    ui('copy-local-key').onclick = copyLocalBridgeKey;
     ui('check-bridge').onclick = () => checkLocalBridge();
     ui('provider').onchange = chooseProvider;
     ui('model').onchange = () => renderReasoningOptions('');
@@ -4051,7 +4053,7 @@ Typr.U = {
     } while (current());
     if (!current()) return;
     const messages = {
-      ready: '桥接已连接', unauthorized: '桥接已运行，请填写正确的本地连接密钥；可点击“复制本地密钥”，允许打开启动器后按 Ctrl+V 粘贴',
+      ready: '桥接已连接', unauthorized: '桥接已运行，请填写正确的本地连接密钥；点击“复制本地密钥”打开本机密钥页，复制后按 Ctrl+V 粘贴',
       incompatible: '检测到旧版桥接或其他服务，请先停止旧服务并启动新版桥接',
       offline: wait ? '未连接。请允许浏览器打开本地启动器；首次使用需先运行 install-bridge-launcher.ps1。' : '桥接未连接，可点击“启动本地桥接”。'
     };
@@ -4061,23 +4063,57 @@ Typr.U = {
     return state;
   }
 
+  function openLocalKeyPage() {
+    if (ui('provider').value !== 'codex') return;
+    try {
+      GM_openInTab('http://127.0.0.1:17653/setup', { active: true, insert: true, setParent: false });
+      log('已打开本机密钥页，请在新标签页点击复制，再返回这里粘贴；页面打不开时请先启动桥接');
+    } catch {
+      log('无法打开本机密钥页，请在浏览器打开 http://127.0.0.1:17653/setup；需要新版桥接正在运行');
+    }
+  }
+
+  function copyLocalBridgeKey() {
+    if (ui('provider').value !== 'codex' || ui('endpoint').value.trim() !== providers.codex.endpoint) return;
+    const key = ui('key').value.trim();
+    if (!key) { openLocalKeyPage(); return; }
+    const button = ui('copy-local-key');
+    if (button.disabled) return;
+    button.disabled = true;
+    const timer = setTimeout(() => {
+      button.disabled = false;
+      log('未收到剪贴板写入确认，请使用本机密钥页复制');
+      openLocalKeyPage();
+    }, 3000);
+    try {
+      GM_setClipboard(key, { type: 'text', mimetype: 'text/plain' }, () => {
+        clearTimeout(timer); button.disabled = false;
+        log('本地连接密钥已复制到剪贴板');
+        toast('本地连接密钥已复制');
+      });
+    } catch {
+      clearTimeout(timer); button.disabled = false;
+      log('油猴剪贴板接口不可用，已切换到本机密钥页');
+      openLocalKeyPage();
+    }
+  }
+
   function startLocalBridge() {
     if (bridgeStarting || ui('provider').value !== 'codex') return;
     bridgeStarting = true;
     ui('start-bridge').disabled = true;
-    ui('copy-local-key').disabled = true;
     // 必须在用户点击的同步调用中触发协议；URI 不含密钥、参数或可执行命令。
     try {
       const link = document.createElement('a');
       link.href = 'byj-codex://start';
       document.documentElement.appendChild(link);
       try { link.click(); } finally { link.remove(); }
-      log('已请求本地启动器启动桥接并复制密钥；如浏览器询问，请允许打开，完成后在密钥框按 Ctrl+V 粘贴');
+      log('已请求启动本地桥接；如未弹出启动器或没有复制成功，请点击“复制本地密钥”使用本机密钥页');
       void checkLocalBridge(true, true).catch(() => {
         log('连接检测失败，可稍后点击“检测连接”重试');
-      }).finally(() => { bridgeStarting = false; ui('start-bridge').disabled = false; ui('copy-local-key').disabled = false; });
+      }).finally(() => { bridgeStarting = false; ui('start-bridge').disabled = false; });
     } catch {
-      bridgeStarting = false; ui('start-bridge').disabled = false; ui('copy-local-key').disabled = false;
+      bridgeStarting = false; ui('start-bridge').disabled = false;
       ui('bridge-status').textContent = '无法打开本地启动器，请先运行 install-bridge-launcher.ps1 或手动运行 start-bridge.ps1。';
     }
   }
@@ -4088,7 +4124,7 @@ Typr.U = {
     ui('endpoint').value = preset.endpoint;
     renderModelOptions(preset.models, preset.model);
     ui('key').value = '';
-    log(ui('provider').value === 'codex' ? '点击启动本地桥接或复制本地密钥，允许打开启动器后，在密钥框按 Ctrl+V 粘贴，再获取模型' : `已选择 ${preset.label}，请填写该服务商的 API Key`);
+    log(ui('provider').value === 'codex' ? '启动桥接后点击复制本地密钥；密钥为空时在本机密钥页复制，再返回粘贴并获取模型' : `已选择 ${preset.label}，请填写该服务商的 API Key`);
   }
   async function fetchModels() {
     const button = ui('get-models');

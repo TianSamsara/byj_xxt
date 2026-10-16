@@ -1,17 +1,21 @@
 # 白玉京：本地 Codex 连接版
 
-当前版本：**0.14.4**（2026-10-16）。详细变更见 [更新日志](CHANGELOG.md)。
+当前版本：**0.14.5**（2026-10-16）。详细变更见 [更新日志](CHANGELOG.md)。
 
 基于提供的 Greasy Fork 脚本 0.13.2 制作。原始文件保留在 `upstream.user.js`，修改版为 `byj.user.js`。本目录原来没有项目文件。
 
 ## 使用
 
-1. [安装 / 更新油猴脚本](https://raw.githubusercontent.com/TianSamsara/byj_xxt/main/byj.user.js)，或用本地 `byj.user.js` 替换原脚本，避免两个版本同时启用。现有旧版需先手动更新一次到 0.14.4，后续由油猴按设置检查更新。
+1. [安装 / 更新油猴脚本](https://raw.githubusercontent.com/TianSamsara/byj_xxt/main/byj.user.js)，或用本地 `byj.user.js` 替换原脚本，避免两个版本同时启用。未配置 GitHub 更新地址的旧版需先手动更新一次，后续由油猴按设置检查更新。
 2. 首次使用，在 PowerShell 中进入此目录，运行 `./install-bridge-launcher.ps1` 注册当前用户的 Windows 启动器。0.14.3 升级也需重新运行一次，使启动器启用自动复制。需要 Node.js 20+ 和本机 `codex.exe`；运行时的绝对路径会保存到被 Git 忽略的 `.bridge-work/launcher.json`。
-3. 在 AI 连接中选择“本地 Codex”，点击“启动本地桥接”或密钥框下方的“复制本地密钥”，允许浏览器打开启动器。启动器从本机 `.bridge-token` 读取密钥并自动复制到剪贴板，即使桥接已运行、密钥框为空也可复制。稍候在 API Key / 本地连接密钥框按 **Ctrl+V** 粘贴。已有密钥继续有效。
+3. 在 AI 连接中选择“本地 Codex”，点击“启动本地桥接”，允许浏览器打开启动器。密钥框为空时，点击“复制本地密钥”会在新标签页打开本机 `http://127.0.0.1:17653/setup`，点击页面中的复制按钮，看到成功提示后返回密钥框按 **Ctrl+V** 粘贴。浏览器不允许自动复制时，可点击“选中密钥，手动复制”后按 Ctrl+C。已有密钥继续有效。
 4. 点击“获取模型”，选择模型和思考强度，保存设置。已填写密钥时，启动桥接后会自动获取模型；也可随时点击“检测连接”。档位由本机 Codex 按模型返回，切换模型会重置为默认档位。浏览器第一次询问访问本机地址时允许该请求。
 
-Windows 启动器使用固定的 `byj-codex://start` 链接，启动本目录桥接并复制本地密钥；不接收 URL 中的命令或密钥，不注册开机自启，无需管理员权限。密钥由本机程序写入剪贴板，页面不需要开放免密获取密钥接口或申请剪贴板读取权限。浏览器脚本本身不能直接执行本机程序，因此需要这一步注册。项目移动或 Node/Codex 路径更新后，需重新注册。卸载运行 `./install-bridge-launcher.ps1 -Uninstall`。非 Windows 环境可继续手动运行 `node bridge.mjs`。
+已填写密钥时，“复制本地密钥”使用油猴的 `GM_setClipboard` 直接复制输入框内容，收到回执后才提示成功；失败会打开本机密钥页。此按钮不再通过 Windows 协议触发复制，避免浏览器拦截协议后没有任何结果。新增 `GM_setClipboard`、`GM_openInTab` 授权，更新时如油猴询问权限请确认。
+
+本机密钥页需要 0.14.5+ 桥接，仅允许浏览器顶层导航；禁止跨站 fetch、iframe 和跨域读取，设置禁止缓存、禁止嵌入和独立 opener。页面在本机显示密钥供用户复制，不提供跨域取密钥的 JSON API。该页面无需 Windows 启动器，桥接已经运行时可直接打开。
+
+Windows 启动器仍使用固定的 `byj-codex://start` 链接，启动本目录桥接并尝试复制本地密钥；网页只报告启动请求，不将它当成剪贴板成功回执。不接收 URL 中的命令或密钥，不注册开机自启，无需管理员权限。项目移动或 Node/Codex 路径更新后，需重新注册。卸载运行 `./install-bridge-launcher.ps1 -Uninstall`。非 Windows 环境可继续手动运行 `node bridge.mjs`。
 
 也可运行 `./start-bridge.ps1 -Background -CopyKey` 启动并复制密钥；剪贴板占用时会短暂重试，失败后可再次点击复制按钮。
 
@@ -43,7 +47,7 @@ Windows 启动器使用固定的 `byj-codex://start` 链接，启动本目录桥
 
 ## 验证
 
-运行 `npm test`，再运行 `node --check byj.user.js`。编辑器测试覆盖模拟 DOM 下的别名与祖先包装去重、隐藏字段过滤和内容同步；连接测试覆盖启动后等待、密钥错误及旧响应丢弃。`node diagnose.mjs` 检查真实 CLI 的账户类型和模型列表；`node diagnose.mjs --smoke` 额外执行一次最小模型请求，会消耗少量额度。可加 `--effort=low` 验证所选思考档位。
+运行 `npm test`，再运行 `node --check byj.user.js`。编辑器测试覆盖模拟 DOM 下的别名与祖先包装去重、隐藏字段过滤和内容同步；连接测试覆盖启动后等待、密钥错误及旧响应丢弃；复制测试覆盖空密钥打开本机页面、油猴复制回执和失败后备，以及本机页面拒绝跨域和嵌入访问。`node diagnose.mjs` 检查真实 CLI 的账户类型和模型列表；`node diagnose.mjs --smoke` 额外执行一次最小模型请求，会消耗少量额度。可加 `--effort=low` 验证所选思考档位。
 
 本次未登录学习通页面进行真实填答/提交测试。原脚本的播放器、题库、跨帧和提交逻辑主要保留，未进行完整重构；使用前请核对答案和提交设置。
 
