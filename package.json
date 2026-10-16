@@ -1,6 +1,6 @@
 {
   "name": "byj-local-codex",
-  "version": "0.14.6",
+  "version": "0.14.7",
   "private": true,
   "type": "module",
   "scripts": { "start": "node bridge.mjs", "test": "node --test bridge.test.mjs userscript.test.mjs editor-targets.test.mjs" },

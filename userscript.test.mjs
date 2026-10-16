@@ -13,11 +13,11 @@ function load(context, name, next) {
 }
 const clean = value => String(value ?? '').replace(/\s+/g, ' ').trim();
 function answerContext() {
-  const c = vm.createContext({ clean });
+  const c = vm.createContext({ clean, settings: { provider: 'codex', codexWebSearch: true } });
   load(c, 'blankValues', 'function essayValues(');
   load(c, 'essayValues', 'function blankHTML(');
   load(c, 'buildAnswerPrompt', 'function parseAIAnswer(');
-  load(c, 'parseAIAnswer', 'async function askAI(');
+  load(c, 'parseAIAnswer', 'function ensureLocalWebSearch(');
   return c;
 }
 test('essays accept multiple points in one editor; blanks retain exact counts', () => {
@@ -43,6 +43,82 @@ test('type detection separates named essays and true blanks', () => {
   assert.equal(type('', '说明三个方面'), 'essay');
   assert.equal(type('', '请填写____'), 'blank');
   assert.equal(type('', '无题型标记', 3), 'blank');
+});
+test('source requirements reflect the actual search setting without inventing sources', () => {
+  const c = answerContext();
+  const item = { type: 'essay', title: '检索并比较至少两个来源', options: [] };
+  assert.match(c.buildAnswerPrompt(item, 0), /先实际检索和查阅/);
+  assert.match(c.buildAnswerPrompt(item, 0), /完整 https 链接/);
+  const choice = { type: 'single', title: '正确的是', options: [{ letter: 'A', text: '选项' }] };
+  assert.match(c.buildAnswerPrompt(choice, 0), /不能附在选项字母或填空内容中/);
+  assert.equal(c.parseAIAnswer('{"status":"ok","answer":"A","sources":[{"title":"参考","url":"https://example.com"}]}', choice), 'A');
+  c.settings.codexWebSearch = false;
+  assert.match(c.buildAnswerPrompt(item, 0), /本次网页搜索已关闭/);
+  assert.match(c.buildAnswerPrompt(item, 0), /不要自行附加/);
+  c.settings.provider = 'openai';
+  assert.doesNotMatch(c.buildAnswerPrompt(item, 0), /本次允许使用内置网页搜索/);
+  assert.throws(() => c.parseAIAnswer('{"status":"needs_review","answer":null,"reason":"来源不足"}', item), /来源不足/);
+});
+test('network capability checks reject an old bridge before making model requests', async () => {
+  const c = vm.createContext({ URL, GM_xmlhttpRequest: request => request.onload({ status: 200, responseText: JSON.stringify({ service: 'byj-codex-bridge' }) }) });
+  load(c, 'ensureLocalWebSearch', 'async function askAI(');
+  await assert.rejects(c.ensureLocalWebSearch('http://127.0.0.1:17653/v1/chat/completions', 'secret'), /重启桥接/);
+  c.GM_xmlhttpRequest = request => {
+    assert.equal(request.url, 'http://127.0.0.1:17653/health');
+    assert.equal(request.headers.Authorization, 'Bearer secret');
+    request.onload({ status: 200, responseText: '{"service":"byj-codex-bridge","capabilities":{"web_search":true}}' });
+  };
+  await c.ensureLocalWebSearch('http://127.0.0.1:17653/v1/chat/completions', 'secret');
+});
+test('only local Codex requests carry the saved web search setting', async () => {
+  const requests = [];
+  const c = vm.createContext({
+    settings: { provider: 'codex', endpoint: 'http://127.0.0.1:17653/v1/chat/completions', key: 'secret', model: 'test', codexWebSearch: true },
+    validateProviderEndpoint: url => url, ensureLocalWebSearch: async () => {}, answerConfig: () => ({}),
+    buildAnswerPrompt: () => '题目', ANSWER_SYSTEM_PROMPT: 'JSON', parseAIAnswer: raw => raw, log: () => {},
+    GM_xmlhttpRequest: request => { requests.push(JSON.parse(request.data)); request.onload({ status: 200, responseText: '{"choices":[{"message":{"content":"OK"}}]}' }); }
+  });
+  load(c, 'askAI', 'function cacheKey(');
+  await c.askAI({}); assert.equal(requests.at(-1).web_search, true);
+  c.settings.codexWebSearch = false;
+  await c.askAI({}); assert.equal(requests.at(-1).web_search, false);
+  c.settings.provider = 'openai';
+  await c.askAI({}); assert.equal('web_search' in requests.at(-1), false);
+});
+test('a request keeps its original credentials and search choice while health is pending', async () => {
+  let ready, sent;
+  const c = vm.createContext({
+    settings: { provider: 'codex', endpoint: 'http://127.0.0.1:17653/v1/chat/completions', key: 'local-key', model: 'local-model', codexWebSearch: true },
+    validateProviderEndpoint: url => url, ensureLocalWebSearch: () => new Promise(resolve => { ready = resolve; }), answerConfig: () => ({}),
+    buildAnswerPrompt: (_item, _images, connection) => { assert.equal(connection.provider, 'codex'); return '题目'; },
+    ANSWER_SYSTEM_PROMPT: 'JSON', parseAIAnswer: raw => raw,
+    GM_xmlhttpRequest: request => { sent = request; request.onload({ status: 200, responseText: '{"choices":[{"message":{"content":"OK"}}]}' }); }
+  });
+  load(c, 'askAI', 'function cacheKey(');
+  const pending = c.askAI({});
+  c.settings = { provider: 'openai', endpoint: 'https://example.com', key: 'other-key', model: 'other', codexWebSearch: false };
+  ready(); await pending;
+  assert.equal(sent.headers.Authorization, 'Bearer local-key');
+  assert.equal(JSON.parse(sent.data).model, 'local-model');
+  assert.equal(JSON.parse(sent.data).web_search, true);
+});
+test('saving and reopening AI settings preserves an explicitly disabled web search', () => {
+  const nodes = new Map();
+  const ui = id => { if (!nodes.has(id)) nodes.set(id, { value: '', checked: false }); return nodes.get(id); };
+  for (const [id, value] of Object.entries({ endpoint: 'local', model: 'test', key: 'secret', provider: 'codex', 'reasoning-effort': 'high' })) ui(id).value = value;
+  let saved;
+  const c = vm.createContext({ ui, settings: { codexWebSearch: true }, validateProviderEndpoint: url => url, SETTINGS_KEY: 'settings',
+    GM_setValue: (_key, value) => { saved = value; }, log() {}, toast() {},
+    learningContext: () => ({}), detectLearningContext: () => ({}), syncAnswerInputs() {}, renderModelOptions() {},
+    providers: { codex: { endpoint: 'local' } }, codexModelCatalog: []
+  });
+  load(c, 'saveSettings', 'let toastTimer');
+  load(c, 'syncInputs', 'function renderModelOptions(');
+  c.saveSettings();
+  assert.equal(saved.codexWebSearch, false);
+  assert.equal(saved.reasoningEffort, 'high');
+  ui('codex-web-search').checked = true;
+  c.syncInputs(); assert.equal(ui('codex-web-search').checked, false);
 });
 test('essay writing preserves all points in one textarea', async () => {
   const c = answerContext();
