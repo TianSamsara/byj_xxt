@@ -1,6 +1,6 @@
 # 白玉京：本地 Codex 连接版
 
-当前版本：**0.14.5**（2026-10-16）。详细变更见 [更新日志](CHANGELOG.md)。
+当前版本：**0.14.6**（2026-10-16）。详细变更见 [更新日志](CHANGELOG.md)。
 
 基于提供的 Greasy Fork 脚本 0.13.2 制作。原始文件保留在 `upstream.user.js`，修改版为 `byj.user.js`。本目录原来没有项目文件。
 
@@ -36,6 +36,7 @@ Windows 启动器仍使用固定的 `byj-codex://start` 链接，启动本目录
 - 简答/论述题与填空题分开处理，一个编辑器内可填写多段、多要点答案；填空题仍逐空校验。
 - 合并同一富文本编辑器的注册别名和 DOM 节点，排除隐藏提交字段、工具栏和不可见控件，避免把一个编辑器识别为多个答题区。
 - 排除包住已注册 UEditor 的 `.eidtDiv`、`.textDIV` 和 `contenteditable` 外层包装，修复日志中的 `editable:DIV, editor:edui…` 重复计数。
+- 富文本校验从编辑器 HTML 保留段落与换行后读取，避免 `getContentTxt()` 合并段落导致“正文已填但内容未确认”的误报。提交字段使用相同文本规则校验，并短暂等待异步同步；正文缺失或字段未同步仍会报错。
 - AI 连接界面增加本地桥接启动按钮、连接状态和检测按钮；启动后自动获取模型，错误密钥和离线状态分别提示。
 - 本地请求等待上限调整为 190 秒，桥接超时为 180 秒；超时和浏览器断开会结束对应进程，最多并行两个请求。
 - 仅监听 IPv4 回环地址，校验 Host、网页 Origin 和随机密钥；请求体最大 12 MiB，只接受文本和内嵌图片，拒绝本地文件路径与远程图片 URL。
@@ -55,5 +56,6 @@ Windows 启动器仍使用固定的 `byj-codex://start` 链接，启动本目录
 
 - [Codex App Server](https://developers.openai.com/codex/app-server)
 - [Codex Authentication](https://developers.openai.com/codex/auth)
+- [UEditor 编辑器源码](https://github.com/fex-team/ueditor/blob/master/_src/core/Editor.js)：`getContentTxt()` 丢弃段落格式，不能直接拿来校验多段答案。
 
 `upgrade.py` 可从保存的原始源码重建本地脚本。`schemas/` 为本机 Codex 生成的协议参考，不参与运行。

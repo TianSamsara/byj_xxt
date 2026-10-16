@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         白玉京xxt神秘玩意
 // @namespace    https://github.com/TianSamsara/byj_xxt
-// @version      0.14.5
+// @version      0.14.6
 // @license      MIT
 // @homepageURL  https://github.com/TianSamsara/byj_xxt
 // @supportURL   https://github.com/TianSamsara/byj_xxt/issues
@@ -2423,6 +2423,28 @@ Typr.U = {
       .replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/\r?\n/g, '<br>');
   }
 
+  function answerTextComparable(value) {
+    // UEditor 的填充字符没有可见正文含义；仍保留单词之间的空格和所有标点。
+    return clean(String(value ?? '').replace(/[\u200b\ufeff]/g, ''));
+  }
+
+  function editorHTMLText(html, doc) {
+    const template = doc.createElement('template');
+    // textContent 本身不为 br / 段落生成分隔符，必须在解析前保留这些边界。
+    template.innerHTML = String(html ?? '')
+      .replace(/<br\b[^>]*>/gi, '\n')
+      .replace(/<\/(?:p|div|li|h[1-6]|tr|table|blockquote|pre|section|article|ul|ol)\s*>/gi, '\n');
+    return template.content.textContent || '';
+  }
+
+  function readEditorAnswer(editor, doc) {
+    if (typeof editor.body?.innerHTML === 'string') return editorHTMLText(editor.body.innerHTML, doc);
+    if (typeof editor.getContent === 'function') return editorHTMLText(editor.getContent(), doc);
+    if (typeof editor.getPlainTxt === 'function') return editor.getPlainTxt();
+    if (typeof editor.getContentTxt === 'function') return editor.getContentTxt();
+    return editor.body?.innerText ?? editor.body?.textContent ?? null;
+  }
+
   async function fillBlanks(container, answer, type = 'blank') {
     // 等编辑器初始化后重新识别，避免把 backing textarea 当成输入控件。
     let targets = blankTargets(container);
@@ -2449,21 +2471,30 @@ Typr.U = {
           editor.setContent(blankHTML(value));
           editor.fireEvent?.('contentchange');
           if (typeof editor.sync !== 'function') throw new Error('无法同步编辑器提交字段');
-          editor.sync();
-          await sleep(100);
-          const actual = typeof editor.getContentTxt === 'function' ? editor.getContentTxt() : editor.body?.textContent;
-          if (actual == null || clean(actual) !== clean(value)) throw new Error('编辑器内容未确认');
           const name = editor.options?.textarea || editor.key;
           const candidates = all(container, 'textarea').filter(node => node.name === name || node.id === name);
           const linked = (target.nodes || []).filter(node => node.matches('textarea'));
           const backing = linked.length === 1 ? linked[0] : candidates.length === 1 ? candidates[0] : null;
           if (!backing && (linked.length > 1 || candidates.length > 1)) throw new Error('无法唯一确认编辑器的提交字段');
-          if (backing) {
-            const markup = container.ownerDocument.createElement('template');
-            markup.innerHTML = backing.value;
-            if (clean(backing.value) !== clean(value) && clean(markup.content.textContent) !== clean(value))
-              throw new Error('编辑区已写入，但提交字段未同步');
+          const expected = answerTextComparable(value);
+          let verificationError = '';
+          for (let attempt = 0; attempt < 10; attempt++) {
+            if (!container.isConnected) throw new Error('题目已变化，无法确认写入结果');
+            editor.sync();
+            await sleep(100);
+            const actual = readEditorAnswer(editor, container.ownerDocument);
+            if (actual == null || answerTextComparable(actual) !== expected) {
+              verificationError = `编辑器正文读取不一致（期望 ${expected.length} 字符，读到 ${actual == null ? '不可读' : answerTextComparable(actual).length} 字符），请核对是否被截断或改写`;
+              continue;
+            }
+            if (backing && answerTextComparable(backing.value) !== expected &&
+                answerTextComparable(editorHTMLText(backing.value, container.ownerDocument)) !== expected) {
+              verificationError = '编辑区已写入，但提交字段未同步，请暂勿提交';
+              continue;
+            }
+            verificationError = ''; break;
           }
+          if (verificationError) throw new Error(verificationError);
         } else {
           const node = target.body || target.node;
           if (target.kind === 'input') dispatchInput(node, value);
@@ -2478,7 +2509,7 @@ Typr.U = {
           if (target.kind === 'frame') throw new Error('已写入编辑区，但无法确认提交字段同步');
         }
         return '';
-      } catch (error) { return `第 ${index + 1} 空：${error.message}`; }
+      } catch (error) { return type === 'essay' ? `简答题：${error.message}` : `第 ${index + 1} 空：${error.message}`; }
     }));
     const failures = outcomes.filter(Boolean);
     return failures.length ? { ok: false, reason: failures.join('；') } : { ok: true };

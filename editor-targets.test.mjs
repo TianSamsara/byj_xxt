@@ -17,7 +17,8 @@ function fixture() {
   const allNodes = [];
   const doc = {
     getElementById: id => allNodes.find(n => n.id === id) || null,
-    createElement: () => ({ content: { textContent: '' }, set innerHTML(value) { this.content.textContent = value.replace(/<br>/g, '\n').replace(/<[^>]+>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&'); } })
+    // Browser template.textContent concatenates text across br and paragraph tags.
+    createElement: () => ({ content: { textContent: '' }, set innerHTML(value) { this.content.textContent = value.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, '\u00a0').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&'); } })
   };
   class Node {
     constructor(tag, attrs = {}, parent = null) {
@@ -63,7 +64,7 @@ function editorFixture(f, id, parent = f.question, sharedName = false) {
   const backing = new f.Node('textarea', { id: `${id}_answer`, name: sharedName ? 'editorValue' : `${id}_answer` }, parent);
   backing.computedDisplay = 'none';
   const editor = { container: shell, iframe: frame, textarea: backing, key: id, options: { textarea: sharedName ? 'editorValue' : backing.name },
-    isReady: true, setContent(html) { this.html = html; }, sync() { backing.value = this.html; }, getContentTxt() { return this.html.replace(/<br>/g, '\n'); } };
+    isReady: true, setContent(html) { this.html = html; }, sync() { backing.value = this.html; }, getContent() { return this.html; }, getContentTxt() { return this.html.replace(/<br>/g, '\n'); } };
   return { shell, frame, backing, editor };
 }
 
@@ -133,4 +134,59 @@ test('two actual editors with a shared default textarea name remain separate for
   const blank = await f.c.fillBlanks(f.question, ['甲', '乙'], 'blank');
   assert.equal(blank.ok, true, blank.reason);
   assert.equal(first.editor.getContentTxt(), '甲'); assert.equal(second.editor.getContentTxt(), '乙');
+});
+
+test('UEditor plain text drops paragraph breaks but visible HTML and synchronized field still verify', async () => {
+  const f = fixture(); const e = editorFixture(f, 'edui7');
+  f.c.window.UE = { instants: { edui7: e.editor } };
+  e.editor.getContentTxt = function() { return this.html.replace(/<[^>]+>/g, ''); };
+  e.editor.setContent = function(html) {
+    this.html = html.split(/<br>/).map(line => `<p><span style="font-family:arial">${line.replace(/ /g, '&nbsp;')}</span></p>`).join('');
+  };
+  const answer = '(1) DBSCAN 使用 ε 和 MinPts。\n\n(2) 环状簇采用密度连接。\n(3) 参数过小会产生噪声。';
+  const result = await f.c.fillBlanks(f.question, answer, 'essay');
+  assert.equal(result.ok, true, result.reason);
+  assert.notEqual(f.c.clean(e.editor.getContentTxt()), f.c.clean(answer), 'the old comparison must fail on this fixture');
+  assert.equal(f.c.answerTextComparable(f.c.editorHTMLText(e.backing.value, f.doc)), f.c.answerTextComparable(answer));
+});
+
+test('HTML entities, literal markup and English word spaces survive verification', async () => {
+  const f = fixture(); const e = editorFixture(f, 'edui7');
+  f.c.window.UE = { instants: { edui7: e.editor } };
+  const answer = '条件：x < y & y > 0\nnot able 与 notable 不同；文字 <br> 原样保留。';
+  const result = await f.c.fillBlanks(f.question, answer, 'essay');
+  assert.equal(result.ok, true, result.reason);
+  assert.notEqual(f.c.answerTextComparable('not able'), f.c.answerTextComparable('notable'));
+  assert.notEqual(f.c.answerTextComparable('x < y'), f.c.answerTextComparable('x > y'));
+});
+
+test('truncated or altered visible content fails even when the editor accepts a write', async () => {
+  const f = fixture(); const e = editorFixture(f, 'edui7');
+  f.c.window.UE = { instants: { edui7: e.editor } };
+  let writes = 0;
+  e.editor.setContent = function() { writes++; this.html = '<p>只剩第一点。</p>'; };
+  const result = await f.c.fillBlanks(f.question, '第一点。\n第二点。\n第三点。', 'essay');
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /正文读取不一致/);
+  assert.doesNotMatch(result.reason, /第 1 空/);
+  assert.equal(writes, 1, 'verification must not repeatedly overwrite the editor');
+});
+
+test('visible answer with an unsynchronized submission field still fails', async () => {
+  const f = fixture(); const e = editorFixture(f, 'edui7');
+  f.c.window.UE = { instants: { edui7: e.editor } };
+  e.editor.sync = () => { e.backing.value = '<p>旧答案。</p>'; };
+  const result = await f.c.fillBlanks(f.question, '新答案。\n完整的第二点。', 'essay');
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /提交字段未同步/);
+});
+
+test('verification allows a delayed field synchronization without rewriting the answer', async () => {
+  const f = fixture(); const e = editorFixture(f, 'edui7');
+  f.c.window.UE = { instants: { edui7: e.editor } };
+  let syncs = 0;
+  e.editor.sync = function() { syncs++; if (syncs >= 3) e.backing.value = this.html; };
+  const result = await f.c.fillBlanks(f.question, '第一点。\n第二点。', 'essay');
+  assert.equal(result.ok, true, result.reason);
+  assert.equal(syncs, 3);
 });

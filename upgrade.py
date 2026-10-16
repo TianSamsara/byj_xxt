@@ -9,7 +9,7 @@ def replace(old, new):
     s = s.replace(old, new)
 
 replace('// @namespace    https://github.com/local/xxt-assistant', '// @namespace    https://github.com/TianSamsara/byj_xxt')
-replace('// @version      0.13.2', '// @version      0.14.5')
+replace('// @version      0.13.2', '// @version      0.14.6')
 replace('// @description  学习通页面内控制面板：', '// @description  支持本地 Codex 登录、模型与思考强度选择；学习通页面内控制面板：')
 # Only this repository supplies updates; the upstream Greasy Fork copy remains unchanged.
 s = '\n'.join(line for line in s.split('\n') if not line.startswith(('// @downloadURL', '// @updateURL')))
@@ -144,10 +144,37 @@ replace("    async function bankLookup(item) {\n      try {", "    async functio
 start = s.index('  function blankTargets(container) {')
 end = s.index('  function blankValues(answer, count) {', start)
 s = s[:start] + Path('userscript/blank-targets.js').read_text(encoding='utf-8') + '\n' + s[end:]
+replace('  async function fillBlanks(container, answer, type = \'blank\') {', Path('userscript/editor-verification.js').read_text(encoding='utf-8') + '\n  async function fillBlanks(container, answer, type = \'blank\') {')
+replace("          editor.sync();\n          await sleep(100);\n          const actual = typeof editor.getContentTxt === 'function' ? editor.getContentTxt() : editor.body?.textContent;\n          if (actual == null || clean(actual) !== clean(value)) throw new Error('编辑器内容未确认');\n", '')
 replace("          const backing = all(container, 'textarea').find(node => node.name === name || node.id === name);", """          const candidates = all(container, 'textarea').filter(node => node.name === name || node.id === name);
           const linked = (target.nodes || []).filter(node => node.matches('textarea'));
           const backing = linked.length === 1 ? linked[0] : candidates.length === 1 ? candidates[0] : null;
           if (!backing && (linked.length > 1 || candidates.length > 1)) throw new Error('无法唯一确认编辑器的提交字段');""")
+replace("""          if (backing) {
+            const markup = container.ownerDocument.createElement('template');
+            markup.innerHTML = backing.value;
+            if (clean(backing.value) !== clean(value) && clean(markup.content.textContent) !== clean(value))
+              throw new Error('编辑区已写入，但提交字段未同步');
+          }""", """          const expected = answerTextComparable(value);
+          let verificationError = '';
+          for (let attempt = 0; attempt < 10; attempt++) {
+            if (!container.isConnected) throw new Error('题目已变化，无法确认写入结果');
+            editor.sync();
+            await sleep(100);
+            const actual = readEditorAnswer(editor, container.ownerDocument);
+            if (actual == null || answerTextComparable(actual) !== expected) {
+              verificationError = `编辑器正文读取不一致（期望 ${expected.length} 字符，读到 ${actual == null ? '不可读' : answerTextComparable(actual).length} 字符），请核对是否被截断或改写`;
+              continue;
+            }
+            if (backing && answerTextComparable(backing.value) !== expected &&
+                answerTextComparable(editorHTMLText(backing.value, container.ownerDocument)) !== expected) {
+              verificationError = '编辑区已写入，但提交字段未同步，请暂勿提交';
+              continue;
+            }
+            verificationError = ''; break;
+          }
+          if (verificationError) throw new Error(verificationError);""")
+replace("      } catch (error) { return `第 ${index + 1} 空：${error.message}`; }", "      } catch (error) { return type === 'essay' ? `简答题：${error.message}` : `第 ${index + 1} 空：${error.message}`; }")
 replace("    let values;\n    try { values = type === 'essay'", """    if (type === 'essay' && targets.length > 1) {
       const details = targets.map(target => `${target.kind}:${target.node.id || target.node.getAttribute('name') || target.node.tagName}`).join(', ').slice(0, 240);
       return { ok: false, reason: `简答题检测到 ${targets.length} 个可编辑答题区（${details}），请核对编辑器识别结果` };
