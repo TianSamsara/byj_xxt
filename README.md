@@ -1,5 +1,7 @@
 # 白玉京：本地 Codex 连接版
 
+另提供 [DeepSeek Harness 的 Codex 本地桥接插件](plugins/dsh-codex-bridge/README.md)：在侧边栏和插件配置页发现、启动、记住并自动连接已有的 Harness 桥接，选择模型和思考强度。插件自身版本为 0.1.0，与学习通脚本独立发布。
+
 当前版本：**0.14.8**（2026-10-16）。详细变更见 [更新日志](CHANGELOG.md)。
 
 基于提供的 Greasy Fork 脚本 0.13.2 制作。原始文件保留在 `upstream.user.js`，修改版为 `byj.user.js`。本目录原来没有项目文件。

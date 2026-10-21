@@ -1,0 +1,17 @@
+{
+  "name": "dsh-plugin-codex-local-bridge",
+  "version": "0.1.0",
+  "description": "发现、记住并连接本机 Codex 桥接，提供模型选择与自动重连面板",
+  "type": "module",
+  "main": "index.mjs",
+  "exports": { ".": "./index.mjs", "./client": "./client.js", "./package.json": "./package.json", "./cordis.patch.yml": "./cordis.patch.yml", "./locale/*.json": "./locale/*.json" },
+  "files": ["index.mjs", "core.mjs", "client.js", "cordis.patch.yml", "icon.svg", "locale", "install.ps1", "install-cli.mjs", "README.md"],
+  "icon": "./icon.svg",
+  "license": "MIT",
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" },
+    "client": { "platform": "web", "inject": ["@deepseek-ai/dsh-api-remotes", "@deepseek-ai/dsh-client-ui-plugin-manager", "@deepseek-ai/dsh-client-ui-layout"] }
+  },
+  "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5", "@deepseek-ai/dsh-typert-protocol": "0.2.1-rc.2" },
+  "scripts": { "test": "node --test test/*.test.mjs" }
+}

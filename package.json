@@ -3,6 +3,6 @@
   "version": "0.14.8",
   "private": true,
   "type": "module",
-  "scripts": { "start": "node bridge.mjs", "test": "node --test bridge.test.mjs userscript.test.mjs editor-targets.test.mjs" },
+  "scripts": { "start": "node bridge.mjs", "test": "node --test bridge.test.mjs userscript.test.mjs editor-targets.test.mjs plugins/dsh-codex-bridge/test/*.test.mjs" },
   "engines": { "node": ">=20" }
 }
