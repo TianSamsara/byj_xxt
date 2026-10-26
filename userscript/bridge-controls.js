@@ -37,7 +37,7 @@
     const messages = {
       ready: '桥接已连接', unauthorized: '桥接已运行，请填写正确的本地连接密钥；点击“复制本地密钥”打开本机密钥页，复制后按 Ctrl+V 粘贴',
       incompatible: '检测到旧版桥接或其他服务，请先停止旧服务并启动新版桥接',
-      offline: wait ? '未连接。请允许浏览器打开本地启动器；首次使用需先运行 install-bridge-launcher.ps1。' : '桥接未连接，可点击“启动本地桥接”。'
+      offline: wait ? '未连接。新电脑请先点击“安装／修复本地桥接”，解压下载包后双击安装一次；已安装时请允许浏览器打开启动器。' : '桥接未连接。首次使用先安装本地桥接，安装过则点击“启动本地桥接”。'
     };
     ui('bridge-status').textContent = messages[state];
     if (wait) log(messages[state]);
@@ -90,12 +90,34 @@
       link.href = 'byj-codex://start';
       document.documentElement.appendChild(link);
       try { link.click(); } finally { link.remove(); }
-      log('已请求启动本地桥接；如未弹出启动器或没有复制成功，请点击“复制本地密钥”使用本机密钥页');
+      log('已请求启动本地桥接。新电脑需先点击“安装／修复本地桥接”，解压下载包并双击安装文件；已安装时允许浏览器打开启动器');
       void checkLocalBridge(true, true).catch(() => {
         log('连接检测失败，可稍后点击“检测连接”重试');
       }).finally(() => { bridgeStarting = false; ui('start-bridge').disabled = false; });
     } catch {
       bridgeStarting = false; ui('start-bridge').disabled = false;
-      ui('bridge-status').textContent = '无法打开本地启动器，请先运行 install-bridge-launcher.ps1 或手动运行 start-bridge.ps1。';
+      ui('bridge-status').textContent = '无法打开启动器。请点击“安装／修复本地桥接”，解压下载包并双击安装文件后再试。';
     }
+  }
+
+  function installLocalBridge() {
+    if (ui('provider').value !== 'codex') return;
+    const button = ui('install-bridge');
+    if (button.disabled) return;
+    button.disabled = true;
+    const url = 'https://raw.githubusercontent.com/TianSamsara/byj_xxt/main/install-byj-bridge.zip';
+    const failed = () => {
+      button.disabled = false;
+      ui('bridge-status').textContent = '下载未完成。请在项目页面下载 install-byj-bridge.zip，解压并双击其中的安装文件一次后返回。';
+      log('安装文件未能下载，可从 GitHub 仓库手动下载；不会执行网页中的命令');
+    };
+    try {
+      GM_download({ url, name: 'install-byj-bridge.zip', saveAs: true, timeout: 60000,
+        onload: () => {
+          button.disabled = false;
+          const message = '安装包已下载，请解压并双击其中的 install-byj-bridge.cmd。安装器自动准备组件、检测 Codex 并启动；完成后返回粘贴密钥、获取模型并保存。';
+          ui('bridge-status').textContent = message; log(message);
+        }, onerror: failed, ontimeout: failed
+      });
+    } catch { failed(); }
   }

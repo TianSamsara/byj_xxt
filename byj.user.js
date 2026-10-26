@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         白玉京xxt神秘玩意
 // @namespace    https://github.com/TianSamsara/byj_xxt
-// @version      0.14.8
+// @version      0.15.0
 // @license      MIT
 // @homepageURL  https://github.com/TianSamsara/byj_xxt
 // @supportURL   https://github.com/TianSamsara/byj_xxt/issues
@@ -15,6 +15,7 @@
 // @grant        GM_setValue
 // @grant        GM_xmlhttpRequest
 // @grant        GM_info
+// @grant        GM_download
 // @grant        GM_setClipboard
 // @grant        GM_openInTab
 // @grant        unsafeWindow
@@ -3825,9 +3826,10 @@ Typr.U = {
               <option value="kimi">Kimi</option><option value="gemini">Gemini / Google</option>
               <option value="custom">自定义 API</option></select></label>
             <div class="settings-card" id="local-bridge" hidden>
-              <b>本地桥接</b><p class="hint" id="bridge-status" role="status" aria-live="polite">点击检测连接，或启动本地桥接。</p>
+              <b>本地桥接</b><p class="hint" id="bridge-status" role="status" aria-live="polite">首次使用先安装一次，以后直接启动。</p>
+              <button class="action" id="install-bridge">安装／修复本地桥接</button>
               <div class="row"><button class="action secondary" id="start-bridge">启动本地桥接</button><button class="action secondary" id="check-bridge">检测连接</button></div>
-              <p class="hint">首次使用：运行 install-bridge-launcher.ps1 注册启动器。浏览器未执行自动复制时，点击“复制本地密钥”打开本机密钥页，在新标签页复制后返回粘贴。已填写密钥时可直接复制。</p>
+              <p class="hint">新电脑：先打开 Codex 并登录，点击上方安装按钮，解压下载包并双击其中的安装文件一次。自动准备桥接和运行组件，不用下载完整项目或手动注册。以后点击启动；密钥复制失败可用下方“复制本地密钥”。</p>
             </div>
             <label class="field">API 地址<input class="field" id="endpoint" type="url" placeholder="https://.../chat/completions"></label>
             <label class="field">API Key / 本地连接密钥<input class="field" id="key" type="password" autocomplete="off"></label>
@@ -3839,7 +3841,7 @@ Typr.U = {
               <p class="hint">默认开启，AI 按需查询公开网页，题目相关搜索词会发往搜索服务。要求来源的题目会在正文保留链接；可能增加等待时间和额度消耗。更改后保存设置，桥接需 0.14.7+。</p></div>
             <div class="row"><button class="action secondary" id="get-models">获取模型</button></div>
             <div class="row"><button class="action" id="save">保存设置</button></div>
-            <p class="hint">本地 Codex：密钥为空时点击复制按钮打开本机密钥页；已有密钥时由油猴直接复制，成功后会提示。粘贴、获取模型后保存。首次启动需注册本地启动器。仅打开 Codex 窗口还不够；需要本机 Codex CLI 的 ChatGPT 登录状态。本地密钥不是 OpenAI API Key。Key 保存在油猴本地存储；答题前请确认接口可信。答案由 AI 生成，提交前建议检查。</p>
+            <p class="hint">本地 Codex：新电脑先点击安装／修复本地桥接，双击安装文件一次。密钥为空时点击复制按钮打开本机密钥页；已有密钥时由油猴直接复制。粘贴、获取模型后保存。仅打开 Codex 窗口还不够；需要本机 Codex CLI 的 ChatGPT 登录状态。本地密钥不是 OpenAI API Key。Key 保存在油猴本地存储；答题前请确认接口可信。答案由 AI 生成，提交前建议检查。</p>
           </div>
         </div>
         <div class="log" id="log"></div>
@@ -3868,6 +3870,7 @@ Typr.U = {
     };
     ui('get-models').onclick = fetchModels;
     ui('start-bridge').onclick = startLocalBridge;
+    ui('install-bridge').onclick = installLocalBridge;
     ui('copy-local-key').onclick = copyLocalBridgeKey;
     ui('check-bridge').onclick = () => checkLocalBridge();
     ui('provider').onchange = chooseProvider;
@@ -4125,7 +4128,7 @@ Typr.U = {
     const messages = {
       ready: '桥接已连接', unauthorized: '桥接已运行，请填写正确的本地连接密钥；点击“复制本地密钥”打开本机密钥页，复制后按 Ctrl+V 粘贴',
       incompatible: '检测到旧版桥接或其他服务，请先停止旧服务并启动新版桥接',
-      offline: wait ? '未连接。请允许浏览器打开本地启动器；首次使用需先运行 install-bridge-launcher.ps1。' : '桥接未连接，可点击“启动本地桥接”。'
+      offline: wait ? '未连接。新电脑请先点击“安装／修复本地桥接”，解压下载包后双击安装一次；已安装时请允许浏览器打开启动器。' : '桥接未连接。首次使用先安装本地桥接，安装过则点击“启动本地桥接”。'
     };
     ui('bridge-status').textContent = messages[state];
     if (wait) log(messages[state]);
@@ -4178,14 +4181,36 @@ Typr.U = {
       link.href = 'byj-codex://start';
       document.documentElement.appendChild(link);
       try { link.click(); } finally { link.remove(); }
-      log('已请求启动本地桥接；如未弹出启动器或没有复制成功，请点击“复制本地密钥”使用本机密钥页');
+      log('已请求启动本地桥接。新电脑需先点击“安装／修复本地桥接”，解压下载包并双击安装文件；已安装时允许浏览器打开启动器');
       void checkLocalBridge(true, true).catch(() => {
         log('连接检测失败，可稍后点击“检测连接”重试');
       }).finally(() => { bridgeStarting = false; ui('start-bridge').disabled = false; });
     } catch {
       bridgeStarting = false; ui('start-bridge').disabled = false;
-      ui('bridge-status').textContent = '无法打开本地启动器，请先运行 install-bridge-launcher.ps1 或手动运行 start-bridge.ps1。';
+      ui('bridge-status').textContent = '无法打开启动器。请点击“安装／修复本地桥接”，解压下载包并双击安装文件后再试。';
     }
+  }
+
+  function installLocalBridge() {
+    if (ui('provider').value !== 'codex') return;
+    const button = ui('install-bridge');
+    if (button.disabled) return;
+    button.disabled = true;
+    const url = 'https://raw.githubusercontent.com/TianSamsara/byj_xxt/main/install-byj-bridge.zip';
+    const failed = () => {
+      button.disabled = false;
+      ui('bridge-status').textContent = '下载未完成。请在项目页面下载 install-byj-bridge.zip，解压并双击其中的安装文件一次后返回。';
+      log('安装文件未能下载，可从 GitHub 仓库手动下载；不会执行网页中的命令');
+    };
+    try {
+      GM_download({ url, name: 'install-byj-bridge.zip', saveAs: true, timeout: 60000,
+        onload: () => {
+          button.disabled = false;
+          const message = '安装包已下载，请解压并双击其中的 install-byj-bridge.cmd。安装器自动准备组件、检测 Codex 并启动；完成后返回粘贴密钥、获取模型并保存。';
+          ui('bridge-status').textContent = message; log(message);
+        }, onerror: failed, ontimeout: failed
+      });
+    } catch { failed(); }
   }
 
   function chooseProvider() {

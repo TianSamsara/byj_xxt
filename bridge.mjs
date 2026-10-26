@@ -78,7 +78,7 @@ export class Codex {
     return new Promise((resolve, reject) => { const id = ++this.seq; this.pending.set(id, { resolve, reject }); this.child.stdin.write(JSON.stringify({ id, method, params }) + '\n'); });
   }
   async init() {
-    await this.rpc('initialize', { clientInfo: { name: 'byj_local_bridge', title: '白玉京本地桥接', version: '0.14.8' } });
+    await this.rpc('initialize', { clientInfo: { name: 'byj_local_bridge', title: '白玉京本地桥接', version: '0.15.0' } });
     this.child.stdin.write('{"method":"initialized"}\n');
   }
   close() { this.child.kill(); this.fail(new Error('请求已结束')); }
@@ -176,7 +176,7 @@ export function createBridge({ token, binary, cwd = root, Client = Codex, idleMs
     }
     const supplied = Buffer.from(req.headers.authorization || ''); const expected = Buffer.from(`Bearer ${token}`);
     if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) return send(401, { error: '本地连接密钥错误' });
-    if (req.method === 'GET' && req.url === '/health') return send(200, { service: 'byj-codex-bridge', version: '0.14.8', capabilities: { web_search: true, warm_process: true } });
+    if (req.method === 'GET' && req.url === '/health') return send(200, { service: 'byj-codex-bridge', version: '0.15.0', active, capabilities: { web_search: true, warm_process: true } });
     const isModels = req.method === 'GET' && req.url === '/v1/models';
     const isAnswer = req.method === 'POST' && req.url === '/v1/chat/completions';
     if (!isModels && !isAnswer) return send(404, { error: '接口不存在' });
@@ -217,5 +217,5 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const cwd = path.join(root, '.bridge-work'); mkdirSync(cwd, { recursive: true });
   const server = createBridge({ token, cwd });
   server.on('error', e => { console.error(`桥接启动失败：${e.message}`); process.exitCode = 1; });
-  server.listen(17653, '127.0.0.1', () => console.log(`本地 Codex 桥接已启动：http://127.0.0.1:17653/v1/chat/completions\n在脚本中选择“本地 Codex”，将以下本地连接密钥填入 Key：\n${token}\n此密钥仅用于本机桥接，请勿分享。按 Ctrl+C 停止。`));
+  server.listen(17653, '127.0.0.1', () => console.log('本地 Codex 桥接已启动：http://127.0.0.1:17653/v1/chat/completions；请在本机 /setup 页面复制连接密钥。'));
 }

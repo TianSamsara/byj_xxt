@@ -1,6 +1,8 @@
 ﻿# Registers a fixed, per-user action. Incoming URI text is deliberately never passed to PowerShell.
 param([switch]$Uninstall)
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'bridge-runtime.ps1')
+Initialize-BridgePowerShell
 $protocolKey = 'HKCU:\Software\Classes\byj-codex'
 $launchScript = Join-Path $PSScriptRoot 'start-bridge.ps1'
 $existingCommand = (Get-ItemProperty -LiteralPath "$protocolKey\shell\open\command" -ErrorAction SilentlyContinue).'(default)'
@@ -12,8 +14,9 @@ if ($Uninstall) {
     Write-Output '已卸载本目录的桥接启动器；桥接文件和密钥保留。'
     return
 }
-$nodeBinary = (Get-Command node -ErrorAction Stop).Source
-$codexBinary = if ($env:CODEX_BIN) { (Resolve-Path -LiteralPath $env:CODEX_BIN).Path } else { (Get-Command codex -ErrorAction Stop).Source }
+$runtime = Resolve-BridgeRuntime $PSScriptRoot -AllowDownload
+$nodeBinary = $runtime.node
+$codexBinary = $runtime.codex
 foreach ($binary in @($nodeBinary, $codexBinary)) {
     if ([System.IO.Path]::GetExtension($binary) -ne '.exe' -or -not (Test-Path -LiteralPath $binary -PathType Leaf)) {
         throw '启动器需要 node.exe 和 codex.exe；可用 CODEX_BIN 指定本机 Codex 可执行文件。'

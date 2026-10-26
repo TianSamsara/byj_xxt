@@ -1,6 +1,8 @@
 ﻿param([switch]$Background, [switch]$CopyKey)
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'bridge-runtime.ps1')
+Initialize-BridgePowerShell
 $bridgeRoot = $PSScriptRoot
 $bridgeFile = Join-Path $bridgeRoot 'bridge.mjs'
 $workDirectory = Join-Path $bridgeRoot '.bridge-work'
@@ -30,9 +32,12 @@ try {
         $runtime = Get-Content -LiteralPath $launcherConfig -Raw | ConvertFrom-Json
         $nodeBinary = $runtime.node
         $codexBinary = $runtime.codex
-    } else {
-        $nodeBinary = (Get-Command node -ErrorAction Stop).Source
-        $codexBinary = if ($env:CODEX_BIN) { $env:CODEX_BIN } else { (Get-Command codex -ErrorAction Stop).Source }
+    }
+    if (-not (Test-BridgeExe $nodeBinary 'node') -or -not (Test-BridgeExe $codexBinary 'codex')) {
+        $runtime = Resolve-BridgeRuntime $bridgeRoot
+        $nodeBinary = $runtime.node; $codexBinary = $runtime.codex
+        New-Item -ItemType Directory -Path $workDirectory -Force | Out-Null
+        $runtime | ConvertTo-Json | Set-Content -LiteralPath $launcherConfig -Encoding UTF8
     }
     foreach ($binary in @($nodeBinary, $codexBinary)) {
         if (-not $binary -or -not [System.IO.Path]::IsPathRooted($binary) -or -not (Test-Path -LiteralPath $binary -PathType Leaf)) {
@@ -64,6 +69,7 @@ try {
     New-Item -ItemType Directory -Path $workDirectory -Force | Out-Null
     $child = Start-Process -FilePath $nodeBinary -ArgumentList ('"{0}"' -f $bridgeFile) -WorkingDirectory $bridgeRoot -WindowStyle Hidden -PassThru `
         -RedirectStandardOutput (Join-Path $workDirectory 'bridge.stdout.log') -RedirectStandardError (Join-Path $workDirectory 'bridge.stderr.log')
+    $child.Id | Set-Content -LiteralPath (Join-Path $workDirectory 'bridge.pid')
     for ($attempt = 0; $attempt -lt 30; $attempt++) {
         Start-Sleep -Milliseconds 200
         if ($child.HasExited) { throw '桥接进程已退出，请检查 .bridge-work/bridge.stderr.log。' }
@@ -73,6 +79,12 @@ try {
             if ($health.service -eq 'byj-codex-bridge') { Write-Output "桥接已在后台启动（PID $($child.Id)）。"; Copy-LocalBridgeKey; return }
         } catch { if ($attempt -eq 29) { throw '桥接启动超时，请检查 .bridge-work 中的日志。' } }
     }
+} catch {
+    if ($child -and -not $child.HasExited) { Stop-Process -Id $child.Id -ErrorAction SilentlyContinue }
+    if ($CopyKey) {
+        try { Add-Type -AssemblyName System.Windows.Forms; [Windows.Forms.MessageBox]::Show($_.Exception.Message, '白玉京 · 桥接未启动') | Out-Null } catch {}
+    }
+    throw
 } finally {
     if ($launcherLock) { $launcherMutex.ReleaseMutex() }
     $launcherMutex.Dispose()

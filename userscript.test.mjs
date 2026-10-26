@@ -263,3 +263,21 @@ test('an old health response cannot apply after the connection key changes', asy
   assert.equal(f.models, 0);
   assert.notEqual(f.node('bridge-status').textContent, '桥接已连接');
 });
+
+test('first-use installer download is explicit, fixed to the repository, and never claims installation success', () => {
+  const f = bridgeContext(); let download;
+  f.c.GM_download = options => { download = options; };
+  f.c.installLocalBridge();
+  assert.equal(f.node('install-bridge').disabled, true);
+  assert.equal(download.url, 'https://raw.githubusercontent.com/TianSamsara/byj_xxt/main/install-byj-bridge.zip');
+  assert.equal(download.name, 'install-byj-bridge.zip'); assert.equal(download.saveAs, true);
+  assert.equal(f.links.length, 0); assert.equal(f.requests.length, 0);
+  download.onload();
+  assert.equal(f.node('install-bridge').disabled, false);
+  assert.match(f.node('bridge-status').textContent, /已下载.*双击/); assert.doesNotMatch(f.node('bridge-status').textContent, /已安装|已连接/);
+});
+test('installer download errors restore the button and describe a manual download fallback', () => {
+  const f = bridgeContext(); f.c.GM_download = options => options.onerror(); f.c.installLocalBridge();
+  assert.equal(f.node('install-bridge').disabled, false); assert.match(f.node('bridge-status').textContent, /下载未完成/);
+  f.node('provider').value = 'openai'; let called = false; f.c.GM_download = () => { called = true; }; f.c.installLocalBridge(); assert.equal(called, false);
+});

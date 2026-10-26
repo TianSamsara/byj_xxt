@@ -2,3 +2,5 @@
 .bridge-work/
 schemas/
 node_modules/
+/installation.json
+/runtime/
