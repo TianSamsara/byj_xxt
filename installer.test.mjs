@@ -13,8 +13,9 @@ const run = promisify(execFile), root = fileURLToPath(new URL('./', import.meta.
 const text = readFileSync(new URL('./install-byj-bridge.cmd', import.meta.url), 'utf8');
 const payload = JSON.parse(Buffer.from(text.match(/\$ByjPayload = '([A-Za-z0-9+/=]+)'/)?.[1] || '', 'base64').toString('utf8'));
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
+const version = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version;
 test('one-file installer bundles all dependencies reproducibly and excludes secrets and user settings', () => {
-  assert.equal(payload.version, '0.15.0');
+  assert.equal(payload.version, version);
   assert.deepEqual(Object.keys(payload.files).sort(), ['bridge.mjs','bridge-pool.mjs','bridge-setup.mjs','bridge-runtime.ps1','start-bridge.ps1','install-bridge-launcher.ps1'].sort());
   for (const [name, entry] of Object.entries(payload.files)) {
     let source = readFileSync(path.join(root, name), 'utf8').replace(/^\uFEFF/, '').replaceAll('\r\n', '\n');
@@ -77,6 +78,6 @@ test('the generated CMD runs by itself from a Unicode path with spaces', { skip:
   const launcher = `& ${quote(file)}; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }`;
   await run(ps, ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(launcher, 'utf16le').toString('base64')], { windowsHide: true, timeout: 40000 });
   const result = JSON.parse(await fs.readFile(resultFile, 'utf8'));
-  assert.equal(result.version, '0.15.0'); assert.equal(result.started, false); assert.equal(result.registered, false);
+  assert.equal(result.version, version); assert.equal(result.started, false); assert.equal(result.registered, false);
   assert.ok((await fs.stat(path.join(destination, 'bridge.mjs'))).size > 1000);
 });

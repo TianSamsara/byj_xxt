@@ -1,5 +1,7 @@
   let bridgeCheckGeneration = 0;
   let bridgeStarting = false;
+  const embeddedBridgeInstaller = '__BYJ_INSTALLER_ZIP_BASE64__';
+  let bridgeInstallerURL = '';
 
   function probeLocalBridge(key) {
     return new Promise(resolve => {
@@ -105,19 +107,25 @@
     const button = ui('install-bridge');
     if (button.disabled) return;
     button.disabled = true;
-    const url = 'https://raw.githubusercontent.com/TianSamsara/byj_xxt/main/install-byj-bridge.zip';
-    const failed = () => {
-      button.disabled = false;
-      ui('bridge-status').textContent = '下载未完成。请在项目页面下载 install-byj-bridge.zip，解压并双击其中的安装文件一次后返回。';
-      log('安装文件未能下载，可从 GitHub 仓库手动下载；不会执行网页中的命令');
-    };
     try {
-      GM_download({ url, name: 'install-byj-bridge.zip', saveAs: true, timeout: 60000,
-        onload: () => {
-          button.disabled = false;
-          const message = '安装包已下载，请解压并双击其中的 install-byj-bridge.cmd。安装器自动准备组件、检测 Codex 并启动；完成后返回粘贴密钥、获取模型并保存。';
-          ui('bridge-status').textContent = message; log(message);
-        }, onerror: failed, ontimeout: failed
-      });
-    } catch { failed(); }
+      if (!bridgeInstallerURL) {
+        const bytes = Uint8Array.from(atob(embeddedBridgeInstaller), char => char.charCodeAt(0));
+        if (bytes.length < 1000 || bytes[0] !== 0x50 || bytes[1] !== 0x4b || bytes[2] !== 3 || bytes[3] !== 4)
+          throw new Error('安装包内容不完整，请重新更新油猴脚本');
+        bridgeInstallerURL = URL.createObjectURL(new Blob([bytes], { type: 'application/zip' }));
+      }
+      const link = ui('installer-save');
+      link.href = bridgeInstallerURL;
+      link.download = 'install-byj-bridge.zip';
+      link.hidden = false;
+      // Keep the click synchronous with the user's action. The visible link remains usable
+      // if a browser blocks programmatic downloads; one small Blob is reused for this page.
+      link.click();
+      const message = '已发起安装包保存。若没有出现下载，请点下方“直接保存安装包”。保存后解压并双击其中的 install-byj-bridge.cmd 一次；完成后返回粘贴密钥、获取模型并保存。';
+      ui('bridge-status').textContent = message; log(message);
+    } catch (error) {
+      const detail = error?.name === 'InvalidCharacterError' ? '内置安装包内容异常，请重新更新脚本' : error?.message === '安装包内容不完整，请重新更新油猴脚本' ? error.message : '浏览器未能创建本地下载文件';
+      const message = `无法准备安装包：${detail}。请点“GitHub 备用下载”，或使用项目页面的 install-byj-bridge.zip。`;
+      ui('bridge-status').textContent = message; log(message);
+    } finally { button.disabled = false; }
   }

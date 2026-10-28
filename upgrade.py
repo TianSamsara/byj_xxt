@@ -1,4 +1,11 @@
 from pathlib import Path
+import base64
+import subprocess
+import sys
+
+# Build the standalone package first so the userscript carries exactly this release's ZIP.
+subprocess.run([sys.executable, str(Path(__file__).with_name('build-installer.py'))], check=True)
+installer_base64 = base64.b64encode(Path('install-byj-bridge.zip').read_bytes()).decode('ascii')
 
 source = Path('upstream.user.js').read_text(encoding='utf-8')
 s = source
@@ -9,7 +16,7 @@ def replace(old, new):
     s = s.replace(old, new)
 
 replace('// @namespace    https://github.com/local/xxt-assistant', '// @namespace    https://github.com/TianSamsara/byj_xxt')
-replace('// @version      0.13.2', '// @version      0.15.0')
+replace('// @version      0.13.2', '// @version      0.15.1')
 replace('// @description  学习通页面内控制面板：', '// @description  支持本地 Codex 登录、模型与思考强度选择；学习通页面内控制面板：')
 # Only this repository supplies updates; the upstream Greasy Fork copy remains unchanged.
 s = '\n'.join(line for line in s.split('\n') if not line.startswith(('// @downloadURL', '// @updateURL')))
@@ -18,7 +25,7 @@ replace('// @license      MIT', '''// @license      MIT
 // @supportURL   https://github.com/TianSamsara/byj_xxt/issues
 // @updateURL    https://raw.githubusercontent.com/TianSamsara/byj_xxt/main/byj.meta.js
 // @downloadURL  https://raw.githubusercontent.com/TianSamsara/byj_xxt/main/byj.user.js''')
-replace('// @grant        unsafeWindow', '// @grant        GM_info\n// @grant        GM_download\n// @grant        GM_setClipboard\n// @grant        GM_openInTab\n// @grant        unsafeWindow')
+replace('// @grant        unsafeWindow', '// @grant        GM_info\n// @grant        GM_setClipboard\n// @grant        GM_openInTab\n// @grant        unsafeWindow')
 replace('  const providers = {', "  const providers = {\n    codex: { label: '本地 Codex（ChatGPT 登录）', endpoint: 'http://127.0.0.1:17653/v1/chat/completions', model: '', models: [] },")
 replace('<option value="openai">', '<option value="codex">本地 Codex（ChatGPT 登录）</option><option value="openai">')
 replace('>API Key<input', '>API Key / 本地连接密钥<input')
@@ -109,15 +116,16 @@ replace('    .panel[hidden]{display:none}', '    .panel[hidden],#reasoning-field
 replace('            <label class="field">API 地址', '''            <div class="settings-card" id="local-bridge" hidden>
               <b>本地桥接</b><p class="hint" id="bridge-status" role="status" aria-live="polite">首次使用先安装一次，以后直接启动。</p>
               <button class="action" id="install-bridge">安装／修复本地桥接</button>
+              <p class="hint"><a id="installer-save" hidden download="install-byj-bridge.zip">直接保存安装包</a> <a href="https://github.com/TianSamsara/byj_xxt/blob/main/install-byj-bridge.zip" target="_blank" rel="noopener noreferrer">GitHub 备用下载</a></p>
               <div class="row"><button class="action secondary" id="start-bridge">启动本地桥接</button><button class="action secondary" id="check-bridge">检测连接</button></div>
-              <p class="hint">新电脑：先打开 Codex 并登录，点击上方安装按钮，解压下载包并双击其中的安装文件一次。自动准备桥接和运行组件，不用下载完整项目或手动注册。以后点击启动；密钥复制失败可用下方“复制本地密钥”。</p>
+              <p class="hint">安装包已随脚本提供，无需联网下载。点击安装按钮保存，未出现下载时点“直接保存安装包”。首次解压并双击安装文件一次，自动准备组件和启动入口；缺少运行组件时安装器仍需联网补齐。</p>
             </div>
             <label class="field">API 地址''')
 replace('            <label class="field">模型<select', '''            <div class="row" id="copy-key-row" hidden><button class="action secondary" id="copy-local-key">复制本地密钥</button></div>
             <label class="field">模型<select''')
 replace('#web-search-field[hidden]{display:none}', '#web-search-field[hidden],#local-bridge[hidden],#copy-key-row[hidden]{display:none}')
 replace("    ui('reasoning-field').hidden = !isCodex;", "    ui('local-bridge').hidden = !isCodex;\n    ui('copy-key-row').hidden = !isCodex;\n    ui('reasoning-field').hidden = !isCodex;")
-replace("  function chooseProvider() {", Path('userscript/bridge-controls.js').read_text(encoding='utf-8') + '\n  function chooseProvider() {')
+replace("  function chooseProvider() {", Path('userscript/bridge-controls.js').read_text(encoding='utf-8').replace('__BYJ_INSTALLER_ZIP_BASE64__', installer_base64) + '\n  function chooseProvider() {')
 replace("    ui('get-models').onclick = fetchModels;", "    ui('get-models').onclick = fetchModels;\n    ui('start-bridge').onclick = startLocalBridge;\n    ui('install-bridge').onclick = installLocalBridge;\n    ui('copy-local-key').onclick = copyLocalBridgeKey;\n    ui('check-bridge').onclick = () => checkLocalBridge();")
 replace("    if (name) selectTab(name);", "    if (name) selectTab(name);\n    if (name === 'settings' && ui('provider').value === 'codex') void checkLocalBridge();")
 replace("    for (const view of all(shadow, '.view')) view.hidden = view.dataset.view !== name;", "    for (const view of all(shadow, '.view')) view.hidden = view.dataset.view !== name;\n    if (name === 'settings' && ui('provider').value === 'codex') void checkLocalBridge();")

@@ -161,13 +161,14 @@ test('reasoning picker follows supported efforts and saved selection', () => {
 
 function bridgeContext(states = ['ready']) {
   const nodes = new Map();
-  const node = id => { if (!nodes.has(id)) nodes.set(id, { value: '', disabled: false, textContent: '' }); return nodes.get(id); };
+  const node = id => { if (!nodes.has(id)) nodes.set(id, { value: '', disabled: false, textContent: '', hidden: true, click() { links.push(this.href); } }); return nodes.get(id); };
   node('provider').value = 'codex'; node('endpoint').value = 'http://127.0.0.1:17653/v1/chat/completions'; node('key').value = 'local-secret';
-  const requests = [], links = [], messages = [], clipboard = [], openedPages = [];
+  const requests = [], links = [], messages = [], clipboard = [], openedPages = [], blobs = [];
   let models = 0;
   const c = vm.createContext({ ui: node, providers: { codex: { endpoint: node('endpoint').value } },
     sleep: async () => {}, log: message => messages.push(message), toast: message => messages.push(message), fetchModels: async () => { models++; },
     setTimeout, clearTimeout,
+    Blob, Uint8Array, atob, URL: { createObjectURL: blob => { blobs.push(blob); return 'blob:https://chaoxing.com/installer-test'; } },
     GM_setClipboard: (value, _info, callback) => { clipboard.push(value); callback(); },
     GM_openInTab: (url, options) => openedPages.push({ url, ...options }),
     document: { documentElement: { appendChild() {} }, createElement: () => { const link = { click() { links.push(this.href); }, remove() {} }; return link; } },
@@ -182,7 +183,7 @@ function bridgeContext(states = ['ready']) {
   const start = source.indexOf('  let bridgeCheckGeneration =');
   const end = source.indexOf('  function chooseProvider(', start);
   vm.runInContext(source.slice(start, end), c);
-  return { c, node, requests, links, messages, clipboard, openedPages, get models() { return models; } };
+  return { c, node, requests, links, messages, clipboard, openedPages, blobs, get models() { return models; } };
 }
 
 test('startup link carries no key and waits for readiness before loading models', async () => {
@@ -264,20 +265,29 @@ test('an old health response cannot apply after the connection key changes', asy
   assert.notEqual(f.node('bridge-status').textContent, '桥接已连接');
 });
 
-test('first-use installer download is explicit, fixed to the repository, and never claims installation success', () => {
-  const f = bridgeContext(); let download;
-  f.c.GM_download = options => { download = options; };
+test('the installer saves the exact embedded ZIP without network, GM_download or credentials', async () => {
+  const f = bridgeContext();
+  f.c.GM_download = () => { throw new Error('download permission disabled'); };
   f.c.installLocalBridge();
-  assert.equal(f.node('install-bridge').disabled, true);
-  assert.equal(download.url, 'https://raw.githubusercontent.com/TianSamsara/byj_xxt/main/install-byj-bridge.zip');
-  assert.equal(download.name, 'install-byj-bridge.zip'); assert.equal(download.saveAs, true);
-  assert.equal(f.links.length, 0); assert.equal(f.requests.length, 0);
-  download.onload();
   assert.equal(f.node('install-bridge').disabled, false);
-  assert.match(f.node('bridge-status').textContent, /已下载.*双击/); assert.doesNotMatch(f.node('bridge-status').textContent, /已安装|已连接/);
+  assert.deepEqual(f.links, ['blob:https://chaoxing.com/installer-test']); assert.equal(f.requests.length, 0);
+  assert.equal(f.node('installer-save').download, 'install-byj-bridge.zip'); assert.equal(f.node('installer-save').hidden, false);
+  assert.equal(f.blobs[0].type, 'application/zip');
+  assert.deepEqual(Buffer.from(await f.blobs[0].arrayBuffer()), readFileSync(new URL('./install-byj-bridge.zip', import.meta.url)));
+  assert.match(f.node('bridge-status').textContent, /已发起.*保存/); assert.doesNotMatch(f.node('bridge-status').textContent, /已下载|已安装|已连接/);
 });
-test('installer download errors restore the button and describe a manual download fallback', () => {
-  const f = bridgeContext(); f.c.GM_download = options => options.onerror(); f.c.installLocalBridge();
-  assert.equal(f.node('install-bridge').disabled, false); assert.match(f.node('bridge-status').textContent, /下载未完成/);
-  f.node('provider').value = 'openai'; let called = false; f.c.GM_download = () => { called = true; }; f.c.installLocalBridge(); assert.equal(called, false);
+test('a blocked programmatic download leaves a clickable save link and reuses its small Blob', () => {
+  const f = bridgeContext(); f.node('installer-save').click = () => {}; f.c.installLocalBridge();
+  assert.equal(f.node('installer-save').hidden, false); assert.match(f.node('installer-save').href, /^blob:/);
+  assert.match(f.node('bridge-status').textContent, /若没有出现下载/);
+  f.c.installLocalBridge(); assert.equal(f.blobs.length, 1);
+});
+test('unsupported local downloads and corrupt packages give an actionable fallback without fetching or executing code', () => {
+  const f = bridgeContext(); f.c.URL.createObjectURL = () => { throw new Error('unsupported'); }; f.c.installLocalBridge();
+  assert.equal(f.node('install-bridge').disabled, false); assert.match(f.node('bridge-status').textContent, /浏览器未能创建.*GitHub 备用下载/);
+  assert.equal(f.requests.length, 0); assert.equal(f.links.length, 0);
+  const corrupted = bridgeContext(); corrupted.c.atob = () => 'bad'; corrupted.c.installLocalBridge();
+  assert.match(corrupted.node('bridge-status').textContent, /内容不完整/); assert.equal(corrupted.blobs.length, 0);
+  const other = bridgeContext(); other.node('provider').value = 'openai'; other.c.installLocalBridge(); assert.equal(other.blobs.length, 0);
+  assert.match(source, /href="https:\/\/github.com\/TianSamsara\/byj_xxt\/blob\/main\/install-byj-bridge.zip"/);
 });
