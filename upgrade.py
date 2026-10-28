@@ -16,7 +16,7 @@ def replace(old, new):
     s = s.replace(old, new)
 
 replace('// @namespace    https://github.com/local/xxt-assistant', '// @namespace    https://github.com/TianSamsara/byj_xxt')
-replace('// @version      0.13.2', '// @version      0.15.1')
+replace('// @version      0.13.2', '// @version      0.15.2')
 replace('// @description  学习通页面内控制面板：', '// @description  支持本地 Codex 登录、模型与思考强度选择；学习通页面内控制面板：')
 # Only this repository supplies updates; the upstream Greasy Fork copy remains unchanged.
 s = '\n'.join(line for line in s.split('\n') if not line.startswith(('// @downloadURL', '// @updateURL')))
@@ -45,7 +45,8 @@ replace("  function modelsURL(endpoint, provider) {", """  function validateProv
   function modelsURL(endpoint, provider) {""")
 # Do not apply a response from a provider that the user has since switched away from.
 replace("      renderModelOptions(models, ui('model').value);\n      log(`已从接口", "      if (ui('provider').value !== provider || ui('endpoint').value.trim() !== endpoint || ui('key').value.trim() !== key) { log('连接设置已改变，已忽略旧模型列表，请重新获取'); return; }\n      renderModelOptions(models, ui('model').value);\n      log(`已从接口")
-replace("      if (preset) {\n        renderModelOptions(preset.models", "      if (ui('provider').value !== provider) return;\n      if (provider === 'codex') { log(`${error.message}；请检查桥接服务和本地连接密钥`); }\n      else if (preset) {\n        renderModelOptions(preset.models")
+replace("      if (preset) {\n        renderModelOptions(preset.models", "      if (ui('provider').value !== provider || ui('endpoint').value.trim() !== endpoint || ui('key').value.trim() !== key) return;\n      if (provider === 'codex') { if (!localBridgeAuthError(error, key)) log(`${error.message}；请检查桥接服务和本地连接密钥`); }\n      else if (preset) {\n        renderModelOptions(preset.models")
+replace("reject(new Error(`模型列表返回 HTTP ${response.status}`)); return;", "const error = new Error(`模型列表返回 HTTP ${response.status}`); error.status = response.status; reject(error); return;")
 # A missing courseQuiz setting in schema v2 must not silently enable submissions.
 replace('courseQuiz: { ...answerDefaults, autoSubmit: true,', 'courseQuiz: { ...answerDefaults, autoSubmit: false,')
 # Bound malformed model catalog payloads before rendering DOM options.
@@ -72,7 +73,7 @@ replace("            resolve(unique);", """            if (provider === 'codex')
               resolve({ models: unique, catalog });
             } else resolve(unique);""")
 replace("      const models = await listModels(endpoint, provider, key);", "      const result = await listModels(endpoint, provider, key);\n      const models = Array.isArray(result) ? result : result.models;")
-replace("      renderModelOptions(models, ui('model').value);", "      if (provider === 'codex') { codexModelCatalog = result.catalog; GM_setValue(CODEX_MODELS_KEY, codexModelCatalog); }\n      renderModelOptions(models, ui('model').value);")
+replace("      renderModelOptions(models, ui('model').value);", "      if (provider === 'codex') { verifyLocalBridgeKey(key, true); ui('bridge-status').textContent = '桥接已连接，请保存设置后再开始作答'; codexModelCatalog = result.catalog; GM_setValue(CODEX_MODELS_KEY, codexModelCatalog); }\n      renderModelOptions(models, ui('model').value);")
 replace("renderModelOptions(providers[ui('provider').value]?.models || [settings.model], settings.model);", "renderModelOptions(ui('provider').value === 'codex' ? codexModelCatalog.map(row => row.id) : providers[ui('provider').value]?.models || [settings.model], settings.model);")
 replace("      ui('model').append(empty); return;", "      ui('model').append(empty); renderReasoningOptions(''); return;")
 replace("    ui('model').value = list.includes(selected) ? selected : list[0];", "    ui('model').value = list.includes(selected) ? selected : list[0];\n    renderReasoningOptions();")
@@ -121,12 +122,12 @@ replace('            <label class="field">API 地址', '''            <div class
               <p class="hint">安装包已随脚本提供，无需联网下载。点击安装按钮保存，未出现下载时点“直接保存安装包”。首次解压并双击安装文件一次，自动准备组件和启动入口；缺少运行组件时安装器仍需联网补齐。</p>
             </div>
             <label class="field">API 地址''')
-replace('            <label class="field">模型<select', '''            <div class="row" id="copy-key-row" hidden><button class="action secondary" id="copy-local-key">复制本地密钥</button></div>
+replace('            <label class="field">模型<select', '''            <div class="row" id="copy-key-row" hidden><button class="action secondary" id="current-local-key">获取当前密钥</button><button class="action secondary" id="copy-local-key">复制本地密钥</button></div>
             <label class="field">模型<select''')
 replace('#web-search-field[hidden]{display:none}', '#web-search-field[hidden],#local-bridge[hidden],#copy-key-row[hidden]{display:none}')
 replace("    ui('reasoning-field').hidden = !isCodex;", "    ui('local-bridge').hidden = !isCodex;\n    ui('copy-key-row').hidden = !isCodex;\n    ui('reasoning-field').hidden = !isCodex;")
 replace("  function chooseProvider() {", Path('userscript/bridge-controls.js').read_text(encoding='utf-8').replace('__BYJ_INSTALLER_ZIP_BASE64__', installer_base64) + '\n  function chooseProvider() {')
-replace("    ui('get-models').onclick = fetchModels;", "    ui('get-models').onclick = fetchModels;\n    ui('start-bridge').onclick = startLocalBridge;\n    ui('install-bridge').onclick = installLocalBridge;\n    ui('copy-local-key').onclick = copyLocalBridgeKey;\n    ui('check-bridge').onclick = () => checkLocalBridge();")
+replace("    ui('get-models').onclick = fetchModels;", "    ui('get-models').onclick = fetchModels;\n    ui('start-bridge').onclick = startLocalBridge;\n    ui('install-bridge').onclick = installLocalBridge;\n    ui('current-local-key').onclick = openLocalKeyPage;\n    ui('copy-local-key').onclick = copyLocalBridgeKey;\n    ui('check-bridge').onclick = () => checkLocalBridge();")
 replace("    if (name) selectTab(name);", "    if (name) selectTab(name);\n    if (name === 'settings' && ui('provider').value === 'codex') void checkLocalBridge();")
 replace("    for (const view of all(shadow, '.view')) view.hidden = view.dataset.view !== name;", "    for (const view of all(shadow, '.view')) view.hidden = view.dataset.view !== name;\n    if (name === 'settings' && ui('provider').value === 'codex') void checkLocalBridge();")
 replace("    if (name === 'settings' && ui('provider').value === 'codex') void checkLocalBridge();\n  }\n\n  function syncInputs", "  }\n\n  function syncInputs")
@@ -212,7 +213,7 @@ replace("    let values;\n    try { values = type === 'essay'", """    if (type 
 ask_start = s.index('  async function askAI(item) {')
 ask_end = s.index('  function cacheKey(item)', ask_start)
 ask_source = s[ask_start:ask_end].replace('settings.', 'connection.')
-ask_source = ask_source.replace('  async function askAI(item) {', '  async function askAI(item) {\n    const connection = { ...settings };')
+ask_source = ask_source.replace('  async function askAI(item) {', '  async function askAI(item) {\n    const connection = { ...loadSettings() };')
 ask_source = ask_source.replace('buildAnswerPrompt(item, images.length)', 'buildAnswerPrompt(item, images.length, connection)')
 s = s[:ask_start] + ask_source + s[ask_end:]
 Path('byj.user.js').write_text(s, encoding='utf-8')

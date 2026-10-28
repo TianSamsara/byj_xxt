@@ -39,7 +39,9 @@ test('the download ZIP contains exactly the standalone installer', () => {
 const ps = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
 const quote = value => "'" + value.replaceAll("'", "''") + "'";
 async function powershell(script, env = process.env) {
-  const prefix = `[Console]::OutputEncoding = New-Object Text.UTF8Encoding($false); $writer = New-Object IO.StreamWriter([Console]::OpenStandardError(),(New-Object Text.UTF8Encoding($false))); $writer.AutoFlush = $true; [Console]::SetError($writer); $ProgressPreference = 'SilentlyContinue'; $ErrorActionPreference = 'Stop'; . ${quote(path.join(root, 'bridge-runtime.ps1'))}; Initialize-BridgePowerShell; . ${quote(path.join(root, 'install-local-bridge.ps1'))}; `;
+  // These NoStart tests simulate a new computer's empty listener inventory and must
+  // not depend on, stop, or overwrite the user's real running bridge on 17653.
+  const prefix = `[Console]::OutputEncoding = New-Object Text.UTF8Encoding($false); $writer = New-Object IO.StreamWriter([Console]::OpenStandardError(),(New-Object Text.UTF8Encoding($false))); $writer.AutoFlush = $true; [Console]::SetError($writer); $ProgressPreference = 'SilentlyContinue'; $ErrorActionPreference = 'Stop'; . ${quote(path.join(root, 'bridge-runtime.ps1'))}; Initialize-BridgePowerShell; . ${quote(path.join(root, 'install-local-bridge.ps1'))}; function Get-NetTCPConnection {}; `;
   const operation = prefix + 'try { ' + script + ' } catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }';
   return run(ps, ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(operation, 'utf16le').toString('base64')], { windowsHide: true, timeout: 45000, env });
 }
@@ -72,7 +74,7 @@ test('the generated CMD runs by itself from a Unicode path with spaces', { skip:
   const directory = path.join(temporary, '安装 测试'); await fs.mkdir(directory);
   const resultFile = path.join(temporary, 'result.json'), destination = path.join(temporary, 'fresh-runtime');
   const cutoff = text.lastIndexOf("$ErrorActionPreference = 'Stop'");
-  const entry = `\r\n$ErrorActionPreference = 'Stop'\r\ntry { $payload = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($ByjPayload)) | ConvertFrom-Json; $result = Install-BYJBridge -Payload $payload -InstallRoot ${quote(destination)} -NoRegister -NoStart; [IO.File]::WriteAllText(${quote(resultFile)},($result | ConvertTo-Json -Compress)) } catch { exit 1 }\r\n`;
+  const entry = `\r\n$ErrorActionPreference = 'Stop'\r\nfunction Get-NetTCPConnection {}\r\ntry { $payload = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($ByjPayload)) | ConvertFrom-Json; $result = Install-BYJBridge -Payload $payload -InstallRoot ${quote(destination)} -NoRegister -NoStart; [IO.File]::WriteAllText(${quote(resultFile)},($result | ConvertTo-Json -Compress)) } catch { exit 1 }\r\n`;
   // Replace only the interactive finish action; keep the shipped CMD bootstrap and embedded sources.
   const file = path.join(directory, 'install.cmd'); await fs.writeFile(file, text.slice(0, cutoff) + entry);
   const launcher = `& ${quote(file)}; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }`;

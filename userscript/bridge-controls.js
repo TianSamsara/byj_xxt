@@ -2,6 +2,21 @@
   let bridgeStarting = false;
   const embeddedBridgeInstaller = '__BYJ_INSTALLER_ZIP_BASE64__';
   let bridgeInstallerURL = '';
+  let verifiedLocalBridgeKey = '';
+  let verifiedLocalBridgeKeyUntil = 0;
+
+  function verifyLocalBridgeKey(key, accepted) {
+    if (ui('provider').value !== 'codex' || ui('endpoint').value.trim() !== providers.codex.endpoint || ui('key').value.trim() !== key) return;
+    verifiedLocalBridgeKey = accepted ? key : '';
+    verifiedLocalBridgeKeyUntil = accepted ? Date.now() + 30000 : 0;
+  }
+
+  function localBridgeAuthError(error, key) {
+    if (error?.status !== 401 || ui('provider').value !== 'codex' || ui('endpoint').value.trim() !== providers.codex.endpoint || ui('key').value.trim() !== key) return false;
+    verifyLocalBridgeKey(key, false);
+    const message = '桥接已运行，但当前密钥不匹配。点击“获取当前密钥”，在本机页面复制后替换 Key，重新获取模型并保存设置。';
+    ui('bridge-status').textContent = message; log(message); return true;
+  }
 
   function probeLocalBridge(key) {
     return new Promise(resolve => {
@@ -36,8 +51,9 @@
       await sleep(1000);
     } while (current());
     if (!current()) return;
+    verifyLocalBridgeKey(key, state === 'ready');
     const messages = {
-      ready: '桥接已连接', unauthorized: '桥接已运行，请填写正确的本地连接密钥；点击“复制本地密钥”打开本机密钥页，复制后按 Ctrl+V 粘贴',
+      ready: '桥接已连接', unauthorized: '桥接已运行，请使用正确的本地连接密钥；点击“获取当前密钥”，在本机页面复制后替换 Key，重新获取模型并保存设置',
       incompatible: '检测到旧版桥接或其他服务，请先停止旧服务并启动新版桥接',
       offline: wait ? '未连接。新电脑请先点击“安装／修复本地桥接”，解压下载包后双击安装一次；已安装时请允许浏览器打开启动器。' : '桥接未连接。首次使用先安装本地桥接，安装过则点击“启动本地桥接”。'
     };
@@ -60,7 +76,7 @@
   function copyLocalBridgeKey() {
     if (ui('provider').value !== 'codex' || ui('endpoint').value.trim() !== providers.codex.endpoint) return;
     const key = ui('key').value.trim();
-    if (!key) { openLocalKeyPage(); return; }
+    if (!key || key !== verifiedLocalBridgeKey || Date.now() >= verifiedLocalBridgeKeyUntil) { openLocalKeyPage(); return; }
     const button = ui('copy-local-key');
     if (button.disabled) return;
     button.disabled = true;

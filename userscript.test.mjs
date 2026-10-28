@@ -89,6 +89,7 @@ test('only local Codex requests carry the saved web search setting', async () =>
     buildAnswerPrompt: () => '题目', ANSWER_SYSTEM_PROMPT: 'JSON', parseAIAnswer: raw => raw, log: () => {},
     GM_xmlhttpRequest: request => { requests.push(JSON.parse(request.data)); request.onload({ status: 200, responseText: '{"choices":[{"message":{"content":"OK"}}]}' }); }
   });
+  c.loadSettings = () => c.settings;
   load(c, 'askAI', 'function cacheKey(');
   await c.askAI({}); assert.equal(requests.at(-1).web_search, true);
   c.settings.codexWebSearch = false;
@@ -105,6 +106,7 @@ test('a request keeps its original credentials and search choice while health is
     ANSWER_SYSTEM_PROMPT: 'JSON', parseAIAnswer: raw => raw,
     GM_xmlhttpRequest: request => { sent = request; request.onload({ status: 200, responseText: '{"choices":[{"message":{"content":"OK"}}]}' }); }
   });
+  c.loadSettings = () => c.settings;
   load(c, 'askAI', 'function cacheKey(');
   const pending = c.askAI({});
   c.settings = { provider: 'openai', endpoint: 'https://example.com', key: 'other-key', model: 'other', codexWebSearch: false };
@@ -220,8 +222,9 @@ test('an empty key opens the local setup page without launching a protocol or le
   assert.equal(f.node('key').value, '');
 });
 
-test('a configured key copies through Tampermonkey and only reports success after the clipboard callback', () => {
+test('a verified key copies through Tampermonkey and only reports success after the clipboard callback', async () => {
   const f = bridgeContext();
+  await f.c.checkLocalBridge();
   let callback;
   f.c.GM_setClipboard = (value, _info, done) => { f.clipboard.push(value); callback = done; };
   f.c.copyLocalBridgeKey();
@@ -237,6 +240,7 @@ test('a configured key copies through Tampermonkey and only reports success afte
 
 test('a failing clipboard API falls back to the local setup page without reporting success', () => {
   const f = bridgeContext();
+  f.c.verifyLocalBridgeKey('local-secret', true);
   f.c.GM_setClipboard = () => { throw new Error('permission denied'); };
   f.c.copyLocalBridgeKey();
   assert.equal(f.node('copy-local-key').disabled, false);
@@ -290,4 +294,57 @@ test('unsupported local downloads and corrupt packages give an actionable fallba
   assert.match(corrupted.node('bridge-status').textContent, /内容不完整/); assert.equal(corrupted.blobs.length, 0);
   const other = bridgeContext(); other.node('provider').value = 'openai'; other.c.installLocalBridge(); assert.equal(other.blobs.length, 0);
   assert.match(source, /href="https:\/\/github.com\/TianSamsara\/byj_xxt\/blob\/main\/install-byj-bridge.zip"/);
+});
+
+test('unverified and rejected keys open the running bridge key page instead of copying stale input', async () => {
+  const unverified = bridgeContext(); unverified.c.copyLocalBridgeKey();
+  assert.equal(unverified.clipboard.length, 0); assert.equal(unverified.openedPages[0].url, 'http://127.0.0.1:17653/setup');
+  const f = bridgeContext(['ready', 'unauthorized']); await f.c.checkLocalBridge();
+  assert.equal(await f.c.checkLocalBridge(), 'unauthorized'); f.c.copyLocalBridgeKey();
+  assert.equal(f.clipboard.length, 0); assert.equal(f.openedPages.length, 1); assert.equal(f.node('key').value, 'local-secret');
+  const expired = bridgeContext(); expired.c.verifyLocalBridgeKey('local-secret', true);
+  expired.c.Date = { now: () => Date.now() + 60000 }; expired.c.copyLocalBridgeKey();
+  assert.equal(expired.clipboard.length, 0); assert.equal(expired.openedPages.length, 1);
+});
+test('model HTTP 401 provides current-key recovery and stale failures cannot invalidate a newly verified key', () => {
+  const f = bridgeContext(); f.c.verifyLocalBridgeKey('local-secret', true);
+  assert.equal(f.c.localBridgeAuthError({ status: 401 }, 'local-secret'), true);
+  assert.match(f.node('bridge-status').textContent, /获取当前密钥.*保存设置/);
+  f.c.copyLocalBridgeKey(); assert.equal(f.clipboard.length, 0); assert.equal(f.openedPages.length, 1);
+  f.node('key').value = 'current-key'; f.c.verifyLocalBridgeKey('current-key', true);
+  assert.equal(f.c.localBridgeAuthError({ status: 401 }, 'local-secret'), false);
+  f.c.copyLocalBridgeKey(); assert.deepEqual(f.clipboard, ['current-key']);
+});
+test('capability HTTP errors distinguish saved-key rejection from server errors and clear cached authorization', async () => {
+  const c = vm.createContext({ URL, GM_xmlhttpRequest: request => request.onload({ status: 401 }) });
+  load(c, 'ensureLocalWebSearch', 'async function askAI(');
+  await assert.rejects(c.ensureLocalWebSearch('http://127.0.0.1:17653/v1/chat/completions', 'private-key'), error => error.status === 401 && /已保存的密钥.*保存设置/.test(error.message) && !error.message.includes('private-key'));
+  assert.equal(c.ensureLocalWebSearch.cached, null);
+  c.GM_xmlhttpRequest = request => request.onload({ status: 503 });
+  await assert.rejects(c.ensureLocalWebSearch('http://127.0.0.1:17653/v1/chat/completions', 'private-key'), /HTTP 503/);
+});
+test('an already opened task frame reads newly saved connection settings for every AI request', async () => {
+  const requests = []; let persisted = { provider: 'codex', endpoint: 'http://127.0.0.1:17653/v1/chat/completions', key: 'new-key', model: 'test-model', codexWebSearch: false };
+  const c = vm.createContext({ settings: { ...persisted, key: 'old-key' }, loadSettings: () => persisted,
+    validateProviderEndpoint: url => url, ensureLocalWebSearch: async () => {}, answerConfig: () => ({}),
+    buildAnswerPrompt: () => '题目', ANSWER_SYSTEM_PROMPT: 'JSON', parseAIAnswer: raw => raw, log() {},
+    GM_xmlhttpRequest: request => { requests.push(request); request.onload({ status: 200, responseText: '{"choices":[{"message":{"content":"OK"}}]}' }); }
+  });
+  load(c, 'askAI', 'function cacheKey(');
+  await c.askAI({}); assert.equal(requests[0].headers.Authorization, 'Bearer new-key');
+  persisted = { ...persisted, key: 'latest-key' }; await c.askAI({});
+  assert.equal(requests[1].headers.Authorization, 'Bearer latest-key'); assert.equal(c.settings.key, 'old-key');
+});
+test('fetching models routes a 401 to key recovery, then accepts a corrected key without retaining the error', async () => {
+  const f = bridgeContext(); f.c.verifyLocalBridgeKey('local-secret', true);
+  f.c.validateProviderEndpoint = value => value;
+  f.c.listModels = async () => { throw Object.assign(new Error('模型列表返回 HTTP 401'), { status: 401 }); };
+  load(f.c, 'fetchModels', 'function saveCourse(');
+  await f.c.fetchModels(); assert.match(f.node('bridge-status').textContent, /获取当前密钥/);
+  f.c.copyLocalBridgeKey(); assert.equal(f.clipboard.length, 0);
+  f.node('key').value = 'new-correct-key';
+  f.c.listModels = async () => ({ models: ['test-model'], catalog: [{ id: 'test-model' }] });
+  f.c.renderModelOptions = () => {}; f.c.GM_setValue = () => {}; f.c.CODEX_MODELS_KEY = 'models';
+  await f.c.fetchModels(); assert.match(f.node('bridge-status').textContent, /桥接已连接.*保存设置/);
+  f.c.copyLocalBridgeKey(); assert.deepEqual(f.clipboard, ['new-correct-key']);
 });

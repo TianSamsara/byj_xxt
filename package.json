@@ -1,6 +1,6 @@
 {
   "name": "byj-local-codex",
-  "version": "0.15.1",
+  "version": "0.15.2",
   "private": true,
   "type": "module",
   "scripts": { "start": "node bridge.mjs", "test": "node --test bridge.test.mjs userscript.test.mjs installer.test.mjs editor-targets.test.mjs plugins/dsh-codex-bridge/test/*.test.mjs", "build": "python upgrade.py" },
