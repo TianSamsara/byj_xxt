@@ -16,7 +16,9 @@ def replace(old, new):
     s = s.replace(old, new)
 
 replace('// @namespace    https://github.com/local/xxt-assistant', '// @namespace    https://github.com/TianSamsara/byj_xxt')
-replace('// @version      0.13.2', '// @version      0.15.2')
+replace('// @version      0.13.2', '// @version      0.15.3')
+replace("  const CHANNEL =", Path('userscript/bridge-pairing.js').read_text(encoding='utf-8') + '\n  const CHANNEL =')
+replace('// @match        *://chaoxing.com/*', '// @match        http://127.0.0.1:17653/setup\n// @match        *://chaoxing.com/*')
 replace('// @description  学习通页面内控制面板：', '// @description  支持本地 Codex 登录、模型与思考强度选择；学习通页面内控制面板：')
 # Only this repository supplies updates; the upstream Greasy Fork copy remains unchanged.
 s = '\n'.join(line for line in s.split('\n') if not line.startswith(('// @downloadURL', '// @updateURL')))
@@ -25,7 +27,7 @@ replace('// @license      MIT', '''// @license      MIT
 // @supportURL   https://github.com/TianSamsara/byj_xxt/issues
 // @updateURL    https://raw.githubusercontent.com/TianSamsara/byj_xxt/main/byj.meta.js
 // @downloadURL  https://raw.githubusercontent.com/TianSamsara/byj_xxt/main/byj.user.js''')
-replace('// @grant        unsafeWindow', '// @grant        GM_info\n// @grant        GM_setClipboard\n// @grant        GM_openInTab\n// @grant        unsafeWindow')
+replace('// @grant        unsafeWindow', '// @grant        GM_info\n// @grant        GM_setClipboard\n// @grant        GM_openInTab\n// @grant        GM_addValueChangeListener\n// @grant        unsafeWindow')
 replace('  const providers = {', "  const providers = {\n    codex: { label: '本地 Codex（ChatGPT 登录）', endpoint: 'http://127.0.0.1:17653/v1/chat/completions', model: '', models: [] },")
 replace('<option value="openai">', '<option value="codex">本地 Codex（ChatGPT 登录）</option><option value="openai">')
 replace('>API Key<input', '>API Key / 本地连接密钥<input')
@@ -106,6 +108,8 @@ replace("    ui('provider').onchange = chooseProvider;", "    ui('provider').onc
 replace("    settings = { ...settings, endpoint, model, key,", "    settings = { ...settings, endpoint, model, key,\n      reasoningEffort: ui('provider').value === 'codex' ? ui('reasoning-effort').value : '',")
 replace("      reasoningEffort: ui('provider').value", "      codexWebSearch: ui('codex-web-search').checked,\n      reasoningEffort: ui('provider').value")
 replace("    syncAnswerInputs();\n    renderModelOptions", "    syncAnswerInputs();\n    ui('codex-web-search').checked = settings.codexWebSearch === true;\n    renderModelOptions")
+replace("ui('codex-web-search').checked = settings.codexWebSearch === true;", "ui('codex-web-search').checked = settings.codexWebSearch === true;\n    ui('auto-bridge-pair').checked = settings.localBridgeAutoPair === true;")
+replace("codexWebSearch: ui('codex-web-search').checked", "localBridgeAutoPair: ui('auto-bridge-pair').checked, codexWebSearch: ui('codex-web-search').checked")
 replace("        data: JSON.stringify({ model: settings.model,", "        data: JSON.stringify({ model: settings.model,\n          ...(settings.provider === 'codex' && settings.reasoningEffort ? { reasoning_effort: settings.reasoningEffort } : {}),")
 replace("          ...(settings.provider === 'codex' && settings.reasoningEffort", "          ...(settings.provider === 'codex' ? { web_search: settings.codexWebSearch === true } : {}),\n          ...(settings.provider === 'codex' && settings.reasoningEffort")
 replace("  async function askAI(item) {", Path('userscript/web-search.js').read_text(encoding='utf-8') + '\n  async function askAI(item) {')
@@ -119,6 +123,9 @@ replace('            <label class="field">API 地址', '''            <div class
               <button class="action" id="install-bridge">安装／修复本地桥接</button>
               <p class="hint"><a id="installer-save" hidden download="install-byj-bridge.zip">直接保存安装包</a> <a href="https://github.com/TianSamsara/byj_xxt/blob/main/install-byj-bridge.zip" target="_blank" rel="noopener noreferrer">GitHub 备用下载</a></p>
               <div class="row"><button class="action secondary" id="start-bridge">启动本地桥接</button><button class="action secondary" id="check-bridge">检测连接</button></div>
+              <button class="action" id="auto-connect-bridge">自动连接并保存</button>
+              <label class="check"><input type="checkbox" id="auto-bridge-pair">密钥失效时自动重新配对（更改后保存）</label>
+              <p class="hint">点击自动连接后，本机密钥页会验证并保存当前密钥，无需复制粘贴。请允许油猴在 127.0.0.1 的配对页面运行；配对会打开新标签页，不会把密钥发给学习通网页。</p>
               <p class="hint">安装包已随脚本提供，无需联网下载。点击安装按钮保存，未出现下载时点“直接保存安装包”。首次解压并双击安装文件一次，自动准备组件和启动入口；缺少运行组件时安装器仍需联网补齐。</p>
             </div>
             <label class="field">API 地址''')
@@ -128,10 +135,11 @@ replace('#web-search-field[hidden]{display:none}', '#web-search-field[hidden],#l
 replace("    ui('reasoning-field').hidden = !isCodex;", "    ui('local-bridge').hidden = !isCodex;\n    ui('copy-key-row').hidden = !isCodex;\n    ui('reasoning-field').hidden = !isCodex;")
 replace("  function chooseProvider() {", Path('userscript/bridge-controls.js').read_text(encoding='utf-8').replace('__BYJ_INSTALLER_ZIP_BASE64__', installer_base64) + '\n  function chooseProvider() {')
 replace("    ui('get-models').onclick = fetchModels;", "    ui('get-models').onclick = fetchModels;\n    ui('start-bridge').onclick = startLocalBridge;\n    ui('install-bridge').onclick = installLocalBridge;\n    ui('current-local-key').onclick = openLocalKeyPage;\n    ui('copy-local-key').onclick = copyLocalBridgeKey;\n    ui('check-bridge').onclick = () => checkLocalBridge();")
+replace("    ui('start-bridge').onclick", "    ui('auto-connect-bridge').onclick = connectLocalBridge;\n    ui('start-bridge').onclick")
 replace("    if (name) selectTab(name);", "    if (name) selectTab(name);\n    if (name === 'settings' && ui('provider').value === 'codex') void checkLocalBridge();")
 replace("    for (const view of all(shadow, '.view')) view.hidden = view.dataset.view !== name;", "    for (const view of all(shadow, '.view')) view.hidden = view.dataset.view !== name;\n    if (name === 'settings' && ui('provider').value === 'codex') void checkLocalBridge();")
 replace("    if (name === 'settings' && ui('provider').value === 'codex') void checkLocalBridge();\n  }\n\n  function syncInputs", "  }\n\n  function syncInputs")
-replace("本地 Codex：先启动 bridge.mjs，将终端显示的本地连接密钥填入 Key，获取模型后保存。", "本地 Codex：新电脑先点击安装／修复本地桥接，双击安装文件一次。密钥为空时点击复制按钮打开本机密钥页；已有密钥时由油猴直接复制。粘贴、获取模型后保存。")
+replace("本地 Codex：先启动 bridge.mjs，将终端显示的本地连接密钥填入 Key，获取模型后保存。", "本地 Codex：安装并启动桥接后，点击“自动连接并保存”，由本机配对页获取当前密钥并保存。首次请允许油猴在本机页面运行。自动配对开启后，401 时重新获取密钥并重试一次；模型和思考强度可另行选择后保存。")
 # Separate open-ended prose from blanks through detection, prompting, validation and writing.
 replace("    if (/填空|简答|论述/.test(attr)) return 'blank';", "    if (/简答|论述|问答|解答|名词解释|分析题|计算题/.test(attr)) return 'essay';\n    if (/填空/.test(attr)) return 'blank';")
 replace("      if (/填空|简答|论述/.test(marker)) return 'blank';", "      if (/简答|论述|问答|解答|名词解释|分析题|计算题/.test(marker)) return 'essay';\n      if (/填空/.test(marker)) return 'blank';")
@@ -213,9 +221,36 @@ replace("    let values;\n    try { values = type === 'essay'", """    if (type 
 ask_start = s.index('  async function askAI(item) {')
 ask_end = s.index('  function cacheKey(item)', ask_start)
 ask_source = s[ask_start:ask_end].replace('settings.', 'connection.')
-ask_source = ask_source.replace('  async function askAI(item) {', '  async function askAI(item) {\n    const connection = { ...loadSettings() };')
+ask_source = ask_source.replace('  async function askAI(item) {', '  async function askAI(item, retried = false) {\n    const connection = { ...loadSettings() };\n    try {')
+ask_source = ask_source.replace('    return new Promise((resolve, reject) => {', '    return await new Promise((resolve, reject) => {')
+ask_source = ask_source.replace('reject(new Error(`API 返回 HTTP ${response.status}${hint}: ${clean(response.responseText).slice(0, 160)}`)); return;', 'const error = new Error(`API 返回 HTTP ${response.status}${hint}`); error.status = response.status; reject(error); return;')
+ask_source = ask_source.rstrip().removesuffix('  }') + '''    } catch (error) {
+      if (!retried && error.status === 401 && connection.localBridgeAutoPair === true && await recoverLocalBridgeKey(connection)) {
+        log('当前桥接密钥已自动更新并保存，正在重试本题');
+        return askAI(item, true);
+      }
+      throw error;
+    }
+  }
+
+'''
 ask_source = ask_source.replace('buildAnswerPrompt(item, images.length)', 'buildAnswerPrompt(item, images.length, connection)')
 s = s[:ask_start] + ask_source + s[ask_end:]
+# Keep unrelated preference saves from writing an old frame's credentials back.
+replace("    const key = prefix === 'hw' ? 'homework' : 'courseQuiz';", "    const key = prefix === 'hw' ? 'homework' : 'courseQuiz';\n    settings = loadSettings();")
+replace("  function saveCourse() {", "  function saveCourse() {\n    settings = loadSettings();")
+replace("    settings = { ...settings, endpoint, model, key,", "    settings = { ...loadSettings(), endpoint, model, key,")
+replace("  let panel, shadow, ui;", """  let panel, shadow, ui;
+  GM_addValueChangeListener(BRIDGE_PAIR_SETTINGS, (_name, previous, next) => {
+    if (!next || next.provider !== 'codex' || next.endpoint !== BRIDGE_PAIR_ENDPOINT || !next.localBridgeAutoPair || next.key === previous?.key) return;
+    settings = loadSettings();
+    if (ui && ui('provider').value === 'codex' && ui('endpoint').value.trim() === BRIDGE_PAIR_ENDPOINT &&
+      ui('key').value.trim() === (previous?.key || '')) {
+      ui('key').value = next.key;
+      ui('auto-bridge-pair').checked = true;
+      ui('bridge-status').textContent = '当前密钥已自动同步并保存';
+    }
+  });""")
 Path('byj.user.js').write_text(s, encoding='utf-8')
 metadata_end = s.index('// ==/UserScript==') + len('// ==/UserScript==')
 Path('byj.meta.js').write_text(s[:metadata_end] + '\n', encoding='utf-8')

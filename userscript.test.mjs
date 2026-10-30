@@ -125,6 +125,7 @@ test('saving and reopening AI settings preserves an explicitly disabled web sear
     learningContext: () => ({}), detectLearningContext: () => ({}), syncAnswerInputs() {}, renderModelOptions() {},
     providers: { codex: { endpoint: 'local' } }, codexModelCatalog: []
   });
+  c.loadSettings = () => c.settings;
   load(c, 'saveSettings', 'let toastTimer');
   load(c, 'syncInputs', 'function renderModelOptions(');
   c.saveSettings();
@@ -168,6 +169,7 @@ function bridgeContext(states = ['ready']) {
   const requests = [], links = [], messages = [], clipboard = [], openedPages = [], blobs = [];
   let models = 0;
   const c = vm.createContext({ ui: node, providers: { codex: { endpoint: node('endpoint').value } },
+    loadSettings: () => ({ localBridgeAutoPair: false }),
     sleep: async () => {}, log: message => messages.push(message), toast: message => messages.push(message), fetchModels: async () => { models++; },
     setTimeout, clearTimeout,
     Blob, Uint8Array, atob, URL: { createObjectURL: blob => { blobs.push(blob); return 'blob:https://chaoxing.com/installer-test'; } },
@@ -315,6 +317,36 @@ test('model HTTP 401 provides current-key recovery and stale failures cannot inv
   assert.equal(f.c.localBridgeAuthError({ status: 401 }, 'local-secret'), false);
   f.c.copyLocalBridgeKey(); assert.deepEqual(f.clipboard, ['current-key']);
 });
+
+test('automatic connection refreshes the key input after private storage synchronization and ignores another provider', async () => {
+  const f = bridgeContext();
+  const paired = { key: 'current', localBridgeAutoPair: true };
+  f.c.settings = {};
+  f.c.loadSettings = () => paired;
+  f.c.requestBridgePair = async () => { f.node('key').value = paired.key; return paired; };
+  await f.c.connectLocalBridge();
+  assert.equal(f.node('key').value, 'current');
+  assert.equal(f.node('auto-bridge-pair').checked, true);
+  assert.equal(f.node('auto-connect-bridge').disabled, false);
+  assert.equal(f.models, 1);
+  assert.match(f.node('bridge-status').textContent, /自动保存/);
+  f.c.requestBridgePair = async () => { f.node('provider').value = 'openai'; f.node('key').value = 'remote'; return paired; };
+  await f.c.connectLocalBridge();
+  assert.equal(f.node('key').value, 'remote');
+  assert.equal(f.models, 1);
+});
+
+test('saving unrelated answer preferences retains the latest stored bridge credentials', () => {
+  const live = { provider: 'codex', key: 'current', localBridgeAutoPair: true, homework: { bank: true } };
+  let saved;
+  const c = vm.createContext({ settings: { ...live, key: 'stale' }, loadSettings: () => live,
+    GM_setValue: (_name, value) => { saved = value; }, SETTINGS_KEY: 'settings', toast() {},
+    ui: () => ({ checked: false, value: 100 }), clamp: x => x });
+  load(c, 'saveAnswerSettings', 'let videoEndedAt');
+  c.saveAnswerSettings('hw');
+  assert.equal(saved.key, 'current'); assert.equal(saved.localBridgeAutoPair, true);
+  assert.equal(saved.homework.bank, false);
+});
 test('capability HTTP errors distinguish saved-key rejection from server errors and clear cached authorization', async () => {
   const c = vm.createContext({ URL, GM_xmlhttpRequest: request => request.onload({ status: 401 }) });
   load(c, 'ensureLocalWebSearch', 'async function askAI(');
@@ -334,6 +366,39 @@ test('an already opened task frame reads newly saved connection settings for eve
   await c.askAI({}); assert.equal(requests[0].headers.Authorization, 'Bearer new-key');
   persisted = { ...persisted, key: 'latest-key' }; await c.askAI({});
   assert.equal(requests[1].headers.Authorization, 'Bearer latest-key'); assert.equal(c.settings.key, 'old-key');
+});
+
+test('AI recovers local HTTP 401 once using saved pairing, including when web search is disabled', async () => {
+  for (const web of [false, true]) {
+    let persisted = { provider: 'codex', endpoint: 'http://127.0.0.1:17653/v1/chat/completions', key: 'old', model: 'test', codexWebSearch: web, localBridgeAutoPair: true };
+    let recovered = 0, posts = 0;
+    const c = vm.createContext({ loadSettings: () => persisted, validateProviderEndpoint: x => x,
+      ensureLocalWebSearch: async (_url, token) => { if (web && token === 'old') { const e = new Error('401'); e.status = 401; throw e; } },
+      answerConfig: () => ({}), buildAnswerPrompt: () => '题目', ANSWER_SYSTEM_PROMPT: 'JSON', parseAIAnswer: x => x, log() {},
+      recoverLocalBridgeKey: async () => { recovered++; persisted = { ...persisted, key: 'new' }; return true; },
+      GM_xmlhttpRequest: req => { posts++; if (req.headers.Authorization === 'Bearer old') req.onload({ status: 401 });
+        else req.onload({ status: 200, responseText: '{"choices":[{"message":{"content":"OK"}}]}' }); }
+    });
+    load(c, 'askAI', 'function cacheKey(');
+    assert.equal(await c.askAI({}), 'OK');
+    assert.equal(recovered, 1); assert.equal(posts, web ? 1 : 2);
+  }
+});
+
+test('AI never retries a second 401, another provider, a timeout, or a server failure', async () => {
+  for (const mode of ['second401', 'remote401', 'timeout', 'server']) {
+    const persisted = { provider: mode === 'remote401' ? 'openai' : 'codex', endpoint: mode === 'remote401' ? 'https://example.com' : 'http://127.0.0.1:17653/v1/chat/completions', key: 'old', model: 'test', localBridgeAutoPair: mode !== 'remote401' };
+    let recovered = 0, posts = 0;
+    const c = vm.createContext({ loadSettings: () => persisted, validateProviderEndpoint: x => x,
+      answerConfig: () => ({}), buildAnswerPrompt: () => '题目', ANSWER_SYSTEM_PROMPT: 'JSON', parseAIAnswer: x => x, log() {},
+      recoverLocalBridgeKey: async () => { recovered++; return true; },
+      GM_xmlhttpRequest: req => { posts++; if (mode === 'timeout') req.ontimeout(); else req.onload({ status: mode === 'server' ? 503 : 401 }); }
+    });
+    load(c, 'askAI', 'function cacheKey(');
+    await assert.rejects(c.askAI({}), /401|503|超时/);
+    assert.equal(posts, mode === 'second401' ? 2 : 1);
+    assert.equal(recovered, mode === 'second401' ? 1 : 0);
+  }
 });
 test('fetching models routes a 401 to key recovery, then accepts a corrected key without retaining the error', async () => {
   const f = bridgeContext(); f.c.verifyLocalBridgeKey('local-secret', true);

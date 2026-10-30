@@ -15,7 +15,9 @@
     if (error?.status !== 401 || ui('provider').value !== 'codex' || ui('endpoint').value.trim() !== providers.codex.endpoint || ui('key').value.trim() !== key) return false;
     verifyLocalBridgeKey(key, false);
     const message = '桥接已运行，但当前密钥不匹配。点击“获取当前密钥”，在本机页面复制后替换 Key，重新获取模型并保存设置。';
-    ui('bridge-status').textContent = message; log(message); return true;
+    ui('bridge-status').textContent = message; log(message);
+    if (loadSettings().localBridgeAutoPair === true) void connectLocalBridge();
+    return true;
   }
 
   function probeLocalBridge(key) {
@@ -59,6 +61,7 @@
     };
     ui('bridge-status').textContent = messages[state];
     if (wait) log(messages[state]);
+    if (state === 'unauthorized' && (wait || loadSettings().localBridgeAutoPair === true)) await connectLocalBridge();
     if (state === 'ready' && loadModels && !ui('get-models').disabled) await fetchModels();
     return state;
   }
@@ -71,6 +74,30 @@
     } catch {
       log('无法打开本机密钥页，请在浏览器打开 http://127.0.0.1:17653/setup；需要新版桥接正在运行');
     }
+  }
+
+  async function connectLocalBridge() {
+    if (ui('provider').value !== 'codex' || ui('endpoint').value.trim() !== providers.codex.endpoint) return;
+    const button = ui('auto-connect-bridge');
+    if (button.disabled) return;
+    button.disabled = true;
+    const previous = ui('key').value.trim();
+    try {
+      log('正在通过本机配对页自动获取并保存密钥，请允许油猴在本机页面运行');
+      const paired = await requestBridgePair();
+      // Never replace another provider or an input the user edited while waiting.
+      if (ui('provider').value !== 'codex' || ui('endpoint').value.trim() !== providers.codex.endpoint || ![previous, paired.key].includes(ui('key').value.trim())) return;
+      settings = loadSettings();
+      ui('key').value = paired.key;
+      ui('auto-bridge-pair').checked = true;
+      verifyLocalBridgeKey(paired.key, true);
+      ui('bridge-status').textContent = '当前密钥与连接设置已自动保存；以后 HTTP 401 时自动重新配对';
+      log('本地桥接已自动连接并保存，无需复制粘贴');
+      await fetchModels();
+      if (ui('provider').value === 'codex' && ui('key').value.trim() === paired.key)
+        ui('bridge-status').textContent = '当前密钥已自动保存；如需更改模型或思考强度，请选择后保存设置';
+    } catch (error) { log(error.message); ui('bridge-status').textContent = error.message; }
+    finally { button.disabled = false; }
   }
 
   function copyLocalBridgeKey() {
