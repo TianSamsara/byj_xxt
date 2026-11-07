@@ -16,7 +16,7 @@ def replace(old, new):
     s = s.replace(old, new)
 
 replace('// @namespace    https://github.com/local/xxt-assistant', '// @namespace    https://github.com/TianSamsara/byj_xxt')
-replace('// @version      0.13.2', '// @version      0.15.3')
+replace('// @version      0.13.2', '// @version      0.16.0')
 replace("  const CHANNEL =", Path('userscript/bridge-pairing.js').read_text(encoding='utf-8') + '\n  const CHANNEL =')
 replace('// @match        *://chaoxing.com/*', '// @match        http://127.0.0.1:17653/setup\n// @match        *://chaoxing.com/*')
 replace('// @description  学习通页面内控制面板：', '// @description  支持本地 Codex 登录、模型与思考强度选择；学习通页面内控制面板：')
@@ -126,6 +126,15 @@ replace('            <label class="field">API 地址', '''            <div class
               <button class="action" id="auto-connect-bridge">自动连接并保存</button>
               <label class="check"><input type="checkbox" id="auto-bridge-pair">密钥失效时自动重新配对（更改后保存）</label>
               <p class="hint">点击自动连接后，本机密钥页会验证并保存当前密钥，无需复制粘贴。请允许油猴在 127.0.0.1 的配对页面运行；配对会打开新标签页，不会把密钥发给学习通网页。</p>
+              <section class="settings-card" aria-label="ChatGPT 账号授权">
+                <b>ChatGPT 账号</b><p class="hint" id="account-status" role="status" aria-live="polite">连接桥接后，可在这里使用 ChatGPT 账号登录。</p>
+                <label class="field">授权方式<select class="field" id="account-flow"><option value="browser">浏览器授权（推荐）</option><option value="device">设备码授权（备用）</option></select></label>
+                <div class="row"><button class="action" id="account-login">使用 ChatGPT 登录</button><button class="action secondary" id="account-refresh">刷新登录状态</button></div>
+                <output class="field" id="account-code" aria-label="设备授权验证码" hidden></output>
+                <a class="hint" id="account-open" target="_blank" rel="noopener noreferrer" hidden>打开官方授权页</a>
+                <button class="action secondary" id="account-cancel" hidden>取消本次授权</button>
+                <p class="hint">在官方页面完成登录，授权由本机 Codex 保存和续期。如当前使用其他登录方式，授权将更新本机 Codex 登录。设备码方式需在 ChatGPT 安全设置允许设备码登录。请暂停作答后操作。</p>
+              </section>
               <p class="hint">安装包已随脚本提供，无需联网下载。点击安装按钮保存，未出现下载时点“直接保存安装包”。首次解压并双击安装文件一次，自动准备组件和启动入口；缺少运行组件时安装器仍需联网补齐。</p>
             </div>
             <label class="field">API 地址''')
@@ -133,9 +142,12 @@ replace('            <label class="field">模型<select', '''            <div cl
             <label class="field">模型<select''')
 replace('#web-search-field[hidden]{display:none}', '#web-search-field[hidden],#local-bridge[hidden],#copy-key-row[hidden]{display:none}')
 replace("    ui('reasoning-field').hidden = !isCodex;", "    ui('local-bridge').hidden = !isCodex;\n    ui('copy-key-row').hidden = !isCodex;\n    ui('reasoning-field').hidden = !isCodex;")
-replace("  function chooseProvider() {", Path('userscript/bridge-controls.js').read_text(encoding='utf-8').replace('__BYJ_INSTALLER_ZIP_BASE64__', installer_base64) + '\n  function chooseProvider() {')
+replace("  function chooseProvider() {", Path('userscript/account-login.js').read_text(encoding='utf-8') + '\n' + Path('userscript/bridge-controls.js').read_text(encoding='utf-8').replace('__BYJ_INSTALLER_ZIP_BASE64__', installer_base64) + '\n  function chooseProvider() {')
 replace("    ui('get-models').onclick = fetchModels;", "    ui('get-models').onclick = fetchModels;\n    ui('start-bridge').onclick = startLocalBridge;\n    ui('install-bridge').onclick = installLocalBridge;\n    ui('current-local-key').onclick = openLocalKeyPage;\n    ui('copy-local-key').onclick = copyLocalBridgeKey;\n    ui('check-bridge').onclick = () => checkLocalBridge();")
 replace("    ui('start-bridge').onclick", "    ui('auto-connect-bridge').onclick = connectLocalBridge;\n    ui('start-bridge').onclick")
+replace("    ui('auto-connect-bridge').onclick", "    ui('account-login').onclick = event => { if (event.isTrusted) void updateAccountLogin('login'); };\n    ui('account-refresh').onclick = () => updateAccountLogin();\n    ui('account-cancel').onclick = event => { if (event.isTrusted) void updateAccountLogin('cancel'); };\n    ui('auto-connect-bridge').onclick")
+replace("panel.attachShadow({ mode: 'open' })", "panel.attachShadow({ mode: 'closed' })")
+replace('#copy-key-row[hidden]{display:none}', '#copy-key-row[hidden],#account-code[hidden],#account-open[hidden],#account-cancel[hidden]{display:none}')
 replace("    if (name) selectTab(name);", "    if (name) selectTab(name);\n    if (name === 'settings' && ui('provider').value === 'codex') void checkLocalBridge();")
 replace("    for (const view of all(shadow, '.view')) view.hidden = view.dataset.view !== name;", "    for (const view of all(shadow, '.view')) view.hidden = view.dataset.view !== name;\n    if (name === 'settings' && ui('provider').value === 'codex') void checkLocalBridge();")
 replace("    if (name === 'settings' && ui('provider').value === 'codex') void checkLocalBridge();\n  }\n\n  function syncInputs", "  }\n\n  function syncInputs")
@@ -224,6 +236,14 @@ ask_source = s[ask_start:ask_end].replace('settings.', 'connection.')
 ask_source = ask_source.replace('  async function askAI(item) {', '  async function askAI(item, retried = false) {\n    const connection = { ...loadSettings() };\n    try {')
 ask_source = ask_source.replace('    return new Promise((resolve, reject) => {', '    return await new Promise((resolve, reject) => {')
 ask_source = ask_source.replace('reject(new Error(`API 返回 HTTP ${response.status}${hint}: ${clean(response.responseText).slice(0, 160)}`)); return;', 'const error = new Error(`API 返回 HTTP ${response.status}${hint}`); error.status = response.status; reject(error); return;')
+ask_source = ask_source.replace('            const hint = images.length', '''            if (connection.provider === 'codex' && response.status === 403) {
+              let code;
+              try { code = JSON.parse(response.responseText).code; } catch {}
+              if (code === 'CHATGPT_LOGIN_REQUIRED') {
+                reject(new Error('请在 AI 连接点击“使用 ChatGPT 登录”，完成授权后再作答')); return;
+              }
+            }
+            const hint = images.length''')
 ask_source = ask_source.rstrip().removesuffix('  }') + '''    } catch (error) {
       if (!retried && error.status === 401 && connection.localBridgeAutoPair === true && await recoverLocalBridgeKey(connection)) {
         log('当前桥接密钥已自动更新并保存，正在重试本题');

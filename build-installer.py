@@ -6,7 +6,7 @@ import json
 import zipfile
 
 ROOT = Path(__file__).resolve().parent
-FILES = ('bridge.mjs', 'bridge-pool.mjs', 'bridge-setup.mjs', 'bridge-runtime.ps1', 'start-bridge.ps1', 'install-bridge-launcher.ps1')
+FILES = ('bridge.mjs', 'bridge-pool.mjs', 'bridge-setup.mjs', 'bridge-auth.mjs', 'bridge-runtime.ps1', 'start-bridge.ps1', 'install-bridge-launcher.ps1')
 
 def build():
     payload = {'version': json.loads((ROOT / 'package.json').read_text(encoding='utf-8'))['version'], 'files': {}}

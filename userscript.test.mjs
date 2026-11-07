@@ -169,6 +169,7 @@ function bridgeContext(states = ['ready']) {
   const requests = [], links = [], messages = [], clipboard = [], openedPages = [], blobs = [];
   let models = 0;
   const c = vm.createContext({ ui: node, providers: { codex: { endpoint: node('endpoint').value } },
+    updateAccountLogin: async () => {},
     loadSettings: () => ({ localBridgeAutoPair: false }),
     sleep: async () => {}, log: message => messages.push(message), toast: message => messages.push(message), fetchModels: async () => { models++; },
     setTimeout, clearTimeout,
@@ -333,6 +334,36 @@ test('automatic connection refreshes the key input after private storage synchro
   f.c.requestBridgePair = async () => { f.node('provider').value = 'openai'; f.node('key').value = 'remote'; return paired; };
   await f.c.connectLocalBridge();
   assert.equal(f.node('key').value, 'remote');
+  assert.equal(f.models, 1);
+});
+
+test('account panel opens only an official authorization page and refreshes models after confirmed login', async () => {
+  const f = bridgeContext();
+  f.c.URL = URL;
+  f.c.clearTimeout = () => {};
+  f.c.setTimeout = () => 1;
+  f.node('account-open').removeAttribute = name => { delete f.node('account-open')[name]; };
+  f.node('account-flow').value = 'device';
+  let state = { account: null, login: { status: 'pending', flow: 'device', loginId: 'attempt', url: 'https://evil.test', userCode: 'ABCD-1234' } };
+  f.c.GM_xmlhttpRequest = request => {
+    assert.equal(request.headers.Authorization, 'Bearer local-secret');
+    if (request.method === 'POST') assert.deepEqual(JSON.parse(request.data), { flow: 'device' });
+    request.onload({ status: 200, responseText: JSON.stringify(state) });
+  };
+  const start = source.indexOf('  let accountRequestGeneration');
+  vm.runInContext(source.slice(start, source.indexOf('  let bridgeCheckGeneration', start)), f.c);
+  await f.c.updateAccountLogin('login');
+  assert.equal(f.openedPages.length, 0);
+  assert.match(f.node('account-status').textContent, /校验失败/);
+  state.login.url = 'https://auth.openai.com/codex/device';
+  await f.c.updateAccountLogin('login');
+  assert.equal(f.openedPages[0].url, state.login.url);
+  assert.equal(f.node('account-code').textContent, 'ABCD-1234');
+  state = { account: { type: 'chatgpt', planType: 'plus' }, login: { status: 'succeeded' } };
+  await f.c.updateAccountLogin();
+  assert.match(f.node('account-status').textContent, /ChatGPT 已登录/);
+  assert.equal(f.node('account-code').textContent, '');
+  assert.equal(f.node('account-open').hidden, true);
   assert.equal(f.models, 1);
 });
 

@@ -94,6 +94,7 @@
       ui('bridge-status').textContent = '当前密钥与连接设置已自动保存；以后 HTTP 401 时自动重新配对';
       log('本地桥接已自动连接并保存，无需复制粘贴');
       await fetchModels();
+      if (ui('provider').value === 'codex' && ui('key').value.trim() === paired.key) void updateAccountLogin();
       if (ui('provider').value === 'codex' && ui('key').value.trim() === paired.key)
         ui('bridge-status').textContent = '当前密钥已自动保存；如需更改模型或思考强度，请选择后保存设置';
     } catch (error) { log(error.message); ui('bridge-status').textContent = error.message; }

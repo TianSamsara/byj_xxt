@@ -37,15 +37,17 @@
       if (!/^[a-f0-9]{64}$/.test(key)) throw new Error('本机密钥格式异常，请重启桥接后重试');
       const health = await pairLocalRequest('/health', key);
       if (health.service !== 'byj-codex-bridge') throw new Error('本机服务身份不匹配');
-      const catalog = await pairLocalRequest('/v1/models', key);
+      let catalog;
+      try { catalog = await pairLocalRequest('/v1/models', key); }
+      catch (error) { if (!health.capabilities?.chatgpt_login) throw error; catalog = { data: [] }; }
       const rows = (Array.isArray(catalog.data) ? catalog.data : []).slice(0, 1000)
         .filter(row => row && typeof row.id === 'string' && row.id.length > 0 && row.id.length <= 120);
-      if (!rows.length) throw new Error('桥接没有可用模型，请确认 Codex 已登录后重试');
+      if (!rows.length && !health.capabilities?.chatgpt_login) throw new Error('桥接没有可用模型，请确认 Codex 已登录后重试');
       if (!validBridgePair(GM_getValue(BRIDGE_PAIR_PENDING), id)) throw new Error('连接设置已改变或配对已过期，请返回重新连接');
       const saved = GM_getValue(BRIDGE_PAIR_SETTINGS, {}) || {};
-      const keepModel = saved.provider === 'codex' && rows.some(row => row.id === saved.model);
+      const keepModel = saved.provider === 'codex' && (!rows.length || rows.some(row => row.id === saved.model));
       GM_setValue(BRIDGE_PAIR_SETTINGS, { ...saved, provider: 'codex', endpoint: BRIDGE_PAIR_ENDPOINT,
-        key, model: keepModel ? saved.model : rows[0].id, reasoningEffort: keepModel ? saved.reasoningEffort || '' : '', localBridgeAutoPair: true });
+        key, model: keepModel ? saved.model || '' : rows[0]?.id || '', reasoningEffort: keepModel ? saved.reasoningEffort || '' : '', localBridgeAutoPair: true });
       GM_setValue(BRIDGE_PAIR_PENDING, { id, expires: 0, done: true });
       if (status) status.textContent = '已自动保存当前密钥与连接设置。返回学习通即可使用，无需复制粘贴；此标签页可以关闭。';
       history.replaceState(null, '', '/setup');

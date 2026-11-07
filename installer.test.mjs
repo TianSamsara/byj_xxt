@@ -16,7 +16,7 @@ const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 const version = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version;
 test('one-file installer bundles all dependencies reproducibly and excludes secrets and user settings', () => {
   assert.equal(payload.version, version);
-  assert.deepEqual(Object.keys(payload.files).sort(), ['bridge.mjs','bridge-pool.mjs','bridge-setup.mjs','bridge-runtime.ps1','start-bridge.ps1','install-bridge-launcher.ps1'].sort());
+  assert.deepEqual(Object.keys(payload.files).sort(), ['bridge.mjs','bridge-pool.mjs','bridge-setup.mjs','bridge-auth.mjs','bridge-runtime.ps1','start-bridge.ps1','install-bridge-launcher.ps1'].sort());
   for (const [name, entry] of Object.entries(payload.files)) {
     let source = readFileSync(path.join(root, name), 'utf8').replace(/^\uFEFF/, '').replaceAll('\r\n', '\n');
     if (name.endsWith('.ps1')) source = '\uFEFF' + source;

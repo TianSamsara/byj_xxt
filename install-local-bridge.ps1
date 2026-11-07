@@ -3,7 +3,7 @@ function Install-BYJBridge {
     param([Parameter(Mandatory=$true)]$Payload, [string]$InstallRoot, [switch]$NoRegister, [switch]$NoStart)
     $ErrorActionPreference = 'Stop'
     Initialize-BridgePowerShell
-    $expectedFiles = @('bridge.mjs','bridge-pool.mjs','bridge-setup.mjs','bridge-runtime.ps1','start-bridge.ps1','install-bridge-launcher.ps1')
+    $expectedFiles = @('bridge.mjs','bridge-pool.mjs','bridge-setup.mjs','bridge-auth.mjs','bridge-runtime.ps1','start-bridge.ps1','install-bridge-launcher.ps1')
     $decoded = @{}
     foreach ($file in $expectedFiles) {
         $entry = $Payload.files.$file

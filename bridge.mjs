@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { setupPage } from './bridge-setup.mjs';
 import { ClientPool } from './bridge-pool.mjs';
+import { BridgeAuth } from './bridge-auth.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 export const MAX_BODY = 12 * 1024 * 1024;
@@ -78,7 +79,7 @@ export class Codex {
     return new Promise((resolve, reject) => { const id = ++this.seq; this.pending.set(id, { resolve, reject }); this.child.stdin.write(JSON.stringify({ id, method, params }) + '\n'); });
   }
   async init() {
-    await this.rpc('initialize', { clientInfo: { name: 'byj_local_bridge', title: '白玉京本地桥接', version: '0.15.3' } });
+    await this.rpc('initialize', { clientInfo: { name: 'byj_local_bridge', title: '白玉京本地桥接', version: '0.16.0' } });
     this.child.stdin.write('{"method":"initialized"}\n');
   }
   close() { this.child.kill(); this.fail(new Error('请求已结束')); }
@@ -106,7 +107,11 @@ export class Codex {
     const [account, catalog, loaded] = await Promise.all([
       this.rpc('account/read', { refreshToken: false }), this.models(), this.configuration()
     ]);
-    if (account.account?.type !== 'chatgpt') throw new Error('本地 Codex 未以 ChatGPT 登录。请先运行 codex login；桥接不会改用 API Key 计费。');
+    if (account.account?.type !== 'chatgpt') {
+      const error = new Error('本地 Codex 未以 ChatGPT 登录，请在 AI 连接点击“使用 ChatGPT 登录”完成授权。');
+      error.code = 'CHATGPT_LOGIN_REQUIRED';
+      throw error;
+    }
     let effort;
     try { effort = selectEffort(body, catalog); }
     catch {
@@ -152,8 +157,9 @@ export class Codex {
 }
 
 export function createBridge({ token, binary, cwd = root, Client = Codex, idleMs = 90000, requestTimeoutMs = timeoutMs }) {
-  let active = 0;
+  let active = 0, authRequests = 0;
   const pool = new ClientPool({ Client, binary, cwd, idleMs });
+  const auth = new BridgeAuth({ Client, binary, cwd, onAuthenticated: () => pool.invalidate() });
   const server = http.createServer(async (req, res) => {
     const started = Date.now();
     const send = (status, value) => { if (!res.destroyed && !res.writableEnded) { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(value)); } };
@@ -176,10 +182,35 @@ export function createBridge({ token, binary, cwd = root, Client = Codex, idleMs
     }
     const supplied = Buffer.from(req.headers.authorization || ''); const expected = Buffer.from(`Bearer ${token}`);
     if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) return send(401, { error: '本地连接密钥错误' });
-    if (req.method === 'GET' && req.url === '/health') return send(200, { service: 'byj-codex-bridge', version: '0.15.3', active, capabilities: { web_search: true, warm_process: true } });
+    if (req.method === 'GET' && req.url === '/health') return send(200, { service: 'byj-codex-bridge', version: '0.16.0', active: active + (auth.pending ? 1 : 0), capabilities: { web_search: true, warm_process: true, chatgpt_login: true } });
+    if (['/auth/status', '/auth/login', '/auth/cancel'].includes(req.url)) {
+      const isStatus = req.url === '/auth/status';
+      if (req.method !== (isStatus ? 'GET' : 'POST')) return send(405, { error: '请求方法不支持' });
+      if (active > 0 || authRequests >= 1) return send(409, { error: '桥接正在处理请求，请暂停作答后重试登录操作' });
+      authRequests++;
+      const timer = setTimeout(() => { send(504, { error: '登录接口等待超时，请刷新状态' }); req.destroy(); }, 25000);
+      timer.unref?.();
+      try {
+        let body = {};
+        if (!isStatus) {
+          let bytes = 0; const chunks = [];
+          for await (const chunk of req) { bytes += chunk.length; if (bytes > 1024) return send(413, { error: '登录请求过大' }); chunks.push(chunk); }
+          try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { return send(400, { error: '登录请求格式错误' }); }
+          const field = req.url === '/auth/login' ? 'flow' : 'loginId';
+          if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(key => key !== field) || typeof body[field] !== 'string')
+            return send(400, { error: '仅允许指定登录方式或取消本次授权，不接受账号密码或令牌' });
+          if (field === 'flow' && !['browser', 'device'].includes(body.flow)) return send(400, { error: '登录方式不支持' });
+        }
+        if (res.destroyed || res.writableEnded) return;
+        const state = isStatus ? await auth.status() : req.url === '/auth/login' ? await auth.start(body.flow) : await auth.cancel(body.loginId);
+        return send(200, state);
+      } catch (error) { return send(502, { error: error.message }); }
+      finally { clearTimeout(timer); authRequests--; }
+    }
     const isModels = req.method === 'GET' && req.url === '/v1/models';
     const isAnswer = req.method === 'POST' && req.url === '/v1/chat/completions';
     if (!isModels && !isAnswer) return send(404, { error: '接口不存在' });
+    if (auth.pending || authRequests > 0) return send(409, { error: '正在处理 ChatGPT 登录，请完成或取消授权后再作答' });
     if (active >= 2) return send(429, { error: '本地 Codex 正忙，请稍后重试' });
     active++; let lease; let timer; let healthy = false;
     const cleanup = () => { if (!res.writableEnded && lease) pool.discard(lease.entry); };
@@ -202,10 +233,13 @@ export function createBridge({ token, binary, cwd = root, Client = Codex, idleMs
       healthy = true;
       if (isAnswer) result.bridge_timing = { ...result.bridge_timing, total_ms: Date.now() - started, reused_process: lease.reused };
       send(200, result);
-    } catch (e) { send(502, { error: String(e.message).slice(0, 500) }); }
+    } catch (e) {
+      if (e.code === 'CHATGPT_LOGIN_REQUIRED') send(403, { code: e.code, error: e.message });
+      else send(502, { error: String(e.message).slice(0, 500) });
+    }
     finally { clearTimeout(timer); res.off('close', cleanup); if (lease) pool.release(lease.entry, healthy); active--; }
   });
-  server.on('close', () => pool.close());
+  server.on('close', () => { auth.close(); pool.close(); });
   return server;
 }
 

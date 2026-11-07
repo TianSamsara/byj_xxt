@@ -56,6 +56,17 @@ test('first-time pairing switches only the connection and chooses an available m
   assert.equal(result.courseQuiz.autoSubmit, false);
 });
 
+test('a login-capable bridge can pair before it is able to list models', async () => {
+  const f = fixture({ provider: 'deepseek', key: '' });
+  f.c.GM_xmlhttpRequest = request => request.url.endsWith('/health')
+    ? request.onload({ status: 200, responseText: '{"service":"byj-codex-bridge","capabilities":{"chatgpt_login":true}}' })
+    : request.onload({ status: 403 });
+  const saved = await f.c.requestBridgePair();
+  assert.equal(saved.key, key);
+  assert.equal(saved.provider, 'codex');
+  assert.equal(saved.model, '');
+});
+
 test('ordinary, forged, expired and embedded setup visits cannot save a key', async () => {
   for (const mode of ['ordinary', 'forged', 'expired', 'embedded', 'other-origin', 'other-path']) {
     const f = fixture(); const original = f.storage.get(SETTINGS);

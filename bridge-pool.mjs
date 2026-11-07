@@ -32,7 +32,7 @@ export class ClientPool {
   }
   release(entry, healthy) {
     if (!this.entries.has(entry)) return;
-    if (!healthy || entry.client.dead || this.closed) return this.discard(entry);
+    if (!healthy || entry.client.dead || this.closed || entry.retire) return this.discard(entry);
     entry.busy = false;
     entry.timer = setTimeout(() => this.discard(entry), this.idleMs);
     entry.timer.unref?.();
@@ -40,5 +40,11 @@ export class ClientPool {
   close() {
     this.closed = true;
     for (const entry of this.entries) this.discard(entry);
+  }
+  invalidate() {
+    for (const entry of this.entries) {
+      if (entry.busy) entry.retire = true;
+      else this.discard(entry);
+    }
   }
 }
