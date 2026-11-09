@@ -62,10 +62,23 @@ test('per-question notes survive rescanning the same question, stay separate, an
   assert.equal(c.withQuestionSupplement(rescanned).userSupplement, undefined);
 });
 
-test('exam routes exit the generated script before handlers or settings are touched', () => {
+test('exam routes initialize only a dismissible protection notice', () => {
   for (const url of ['https://mooc1.chaoxing.com/exam-ans/exam/test/examcode/examnotes', 'https://mooc1.chaoxing.com/work?examId=123']) {
     const window = {}; window.parent = window.top = window;
-    assert.doesNotThrow(() => vm.runInNewContext(source, { URL, location: new URL(url), window, document: {} }));
+    let mounted;
+    const element = () => ({
+      append(...children) { this.children = children; }, setAttribute() {},
+      attachShadow() { return this.shadow = element(); },
+      addEventListener(event, handler) { assert.equal(event, 'click'); this.dismiss = handler; },
+      remove() { mounted = null; }
+    });
+    const document = { body: { append(host) { mounted = host; } }, createElement: element, getElementById: () => null };
+    vm.runInNewContext(source, { URL, location: new URL(url), window, document });
+    const [title, detail, close] = mounted.shadow.children[1].children;
+    assert.match(title.textContent, /考试保护已启用/);
+    assert.match(detail.textContent, /扫描、AI 作答、填答和自动交卷均已停用/);
+    close.dismiss();
+    assert.equal(mounted, null);
   }
 });
 

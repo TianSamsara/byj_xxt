@@ -16,7 +16,7 @@ def replace(old, new):
     s = s.replace(old, new)
 
 replace('// @namespace    https://github.com/local/xxt-assistant', '// @namespace    https://github.com/TianSamsara/byj_xxt')
-replace('// @version      0.13.2', '// @version      0.16.1')
+replace('// @version      0.13.2', '// @version      0.16.2')
 replace("  const CHANNEL =", Path('userscript/bridge-pairing.js').read_text(encoding='utf-8') + '\n  const CHANNEL =')
 replace('// @match        *://chaoxing.com/*', '// @match        http://127.0.0.1:17653/setup\n// @match        *://chaoxing.com/*')
 replace('// @description  学习通页面内控制面板：', '// @description  支持本地 Codex 登录、模型与思考强度选择；学习通页面内控制面板：')
