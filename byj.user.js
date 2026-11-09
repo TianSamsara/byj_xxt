@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         白玉京xxt神秘玩意
 // @namespace    https://github.com/TianSamsara/byj_xxt
-// @version      0.16.0
+// @version      0.16.1
 // @license      MIT
 // @homepageURL  https://github.com/TianSamsara/byj_xxt
 // @supportURL   https://github.com/TianSamsara/byj_xxt/issues
@@ -132,6 +132,32 @@
     return;
   }
 
+  function isExamURL(value) {
+    if (!value) return false;
+    try {
+      const url = new URL(value, location.href);
+      return ['https:', 'http:'].includes(url.protocol) && /(^|\.)chaoxing\.com$/i.test(url.hostname) &&
+        (/exam/i.test(url.pathname) || [...url.searchParams.keys()].some(name => /^(examid|examanswerid)$/i.test(name)));
+    } catch { return false; }
+  }
+
+  function isExamRoute() {
+    if (isExamURL(location.href)) return true;
+    if (window !== window.top && isExamURL(document.referrer)) return true;
+    for (let frame = window; frame !== frame.parent;) {
+      frame = frame.parent;
+      try { if (isExamURL(frame.location.href)) return true; } catch { /* Cross-origin ancestor. */ }
+    }
+    for (const frame of document.querySelectorAll('iframe[src], frame[src]')) {
+      if (isExamURL(frame.src)) return true;
+      try { if (isExamURL(frame.contentWindow?.location.href)) return true; } catch { /* Cross-origin child. */ }
+    }
+    return false;
+  }
+
+  // Run before registering listeners, creating a panel or modifying page state.
+  if (isExamRoute()) return;
+
   const CHANNEL = 'xxt-assistant-0.2';
   // 脚本版本：由管理器注入的 GM_info 读取，供面板标题展示，便于确认浏览器里运行的是哪个版本
   const SCRIPT_VERSION = (() => { try { return GM_info.script.version || ''; } catch { return ''; } })();
@@ -216,6 +242,51 @@
   const videoState = new WeakMap();
   let busy = false;
   let scanItems = [];
+  const questionSupplements = new Map();
+  const supplementNodeIds = new WeakMap();
+  let supplementNodeSequence = 0;
+  const MAX_QUESTION_SUPPLEMENT = 1200;
+
+  function questionSupplementId(container) {
+    if (!supplementNodeIds.has(container)) supplementNodeIds.set(container, `${frameId}:${++supplementNodeSequence}`);
+    return supplementNodeIds.get(container);
+  }
+
+  function questionSupplementKey(item) {
+    return JSON.stringify([item.supplementId, item.pageUrl, item.type, item.title,
+      item.options.map(option => [option.letter, option.text]), item.images || []]);
+  }
+
+  function withQuestionSupplement(item) {
+    const userSupplement = questionSupplements.get(questionSupplementKey(item));
+    return userSupplement ? { ...item, userSupplement } : item;
+  }
+
+  function appendQuestionSupplement(card, item, index) {
+    const key = questionSupplementKey(item);
+    const label = document.createElement('label');
+    label.className = 'field';
+    label.textContent = '补充给 AI（选填）';
+    const input = document.createElement('textarea');
+    input.className = 'field question-supplement';
+    input.rows = 2;
+    input.maxLength = MAX_QUESTION_SUPPLEMENT;
+    input.placeholder = '例如：我的主修专业是人力资源管理，希望以招聘专员为例';
+    input.value = questionSupplements.get(key) || '';
+    input.disabled = busy;
+    const hint = document.createElement('small');
+    hint.className = 'question-supplement-hint';
+    hint.id = `question-supplement-hint-${index}`;
+    hint.textContent = '仅当前页面保留。作答时发送给所选 AI，跳过共享题库。';
+    input.setAttribute('aria-describedby', hint.id);
+    input.addEventListener('input', () => {
+      const value = input.value.trim().slice(0, MAX_QUESTION_SUPPLEMENT);
+      if (value) questionSupplements.set(key, value);
+      else questionSupplements.delete(key);
+    });
+    label.append(input);
+    card.append(label, hint);
+  }
   let panel, shadow, ui;
   GM_addValueChangeListener(BRIDGE_PAIR_SETTINGS, (_name, previous, next) => {
     if (!next || next.provider !== 'codex' || next.endpoint !== BRIDGE_PAIR_ENDPOINT || !next.localBridgeAutoPair || next.key === previous?.key) return;
@@ -239,8 +310,6 @@
     try { return /(^|\.)chaoxing\.com$/i.test(new URL(origin).hostname); }
     catch { return false; }
   };
-  // 提交保护必须在子帧提前初始化；/exam 路由一律留给用户手动交卷。
-  function isExamRoute() { return /exam/i.test(location.pathname); }
   function courseSubmissionPending() {
     return isTop && (busy || [...submissionStates.values()].some(record =>
       !['confirmed', 'blocked', 'cancelled'].includes(record.status) && record.source &&
@@ -2335,6 +2404,7 @@ Typr.U = {
   }
 
   function extractLocal(visionEnabled = answerConfig().vision) {
+    if (isExamRoute()) return [];
     localQuestions.clear();
     const containers = getQuestionContainers();
     const result = [];
@@ -2383,7 +2453,7 @@ Typr.U = {
       // 开启“图片传 AI”且题目含图时，纯图片题干也可由视觉模型作答，不再按未识别跳过
       const visionReady = visionEnabled && images.length > 0;
       const id = `${frameId}:${index}`;
-      const item = { id, frameId, pageUrl: location.href, examRoute: isExamRoute(), coverageOk: questionCoverageOk(),
+      const item = { id, frameId, pageUrl: location.href, supplementId: questionSupplementId(container), examRoute: isExamRoute(), coverageOk: questionCoverageOk(),
         title, context: detectLearningContext(), type: detectType(container, options, optionEls), options, images,
         unsupported: images.length > 6 ? '题目超过 6 张有效图片，请人工核对，已停止不完整作答' : encNote || (imageOnly && !visionReady ? '题干未识别，请人工核对' : '') };
       if (item.type === 'blank') {
@@ -2635,6 +2705,7 @@ Typr.U = {
   }
 
   async function fillLocal(id, answer) {
+    if (isExamRoute()) return { ok: false, reason: '考试页面已停用辅助填答' };
     const saved = localQuestions.get(id);
     if (!saved || !saved.container.isConnected) return { ok: false, reason: '题目已变化，请重新扫描' };
     const { container, optionEls, item } = saved;
@@ -2699,6 +2770,7 @@ Typr.U = {
   }
 
   function onMessage(event) {
+    if (isExamRoute()) return;
     const data = event.data;
     if (!isChaoxingOrigin(event.origin) || data?.channel !== CHANNEL) return;
     if (data.kind === 'request') {
@@ -2766,23 +2838,26 @@ Typr.U = {
     return { frameId, pageUrl: location.href, examRoute: isExamRoute(), coverageOk: questionCoverageOk(), submission: inspectSubmission() };
   }
   function requestScan() {
+    if (isExamRoute()) return Promise.resolve([]);
     const requestId = Math.random().toString(36).slice(2);
     const items = new Map();
     lastScanFrames.clear();
     const listener = event => {
       if (!isChaoxingOrigin(event.origin) || event.data?.channel !== CHANNEL ||
           event.data?.kind !== 'scan-result' || event.data.requestId !== requestId) return;
+      if (event.data.page?.examRoute || isExamURL(event.data.page?.pageUrl)) return;
       if (event.data.page) lastScanFrames.set(event.data.frameId, { ...event.data.page, source: event.source });
-      for (const item of event.data.items) items.set(item.id, item);
+      for (const item of event.data.items) if (!item.examRoute && !isExamURL(item.pageUrl)) items.set(item.id, item);
     };
     window.addEventListener('message', listener);
     fanOut({ channel: CHANNEL, kind: 'request', action: 'scan', requestId, vision: answerConfig().vision });
     for (const item of extractLocal()) items.set(item.id, item);
     lastScanFrames.set(frameId, { ...scanFrameInfo(), source: window });
-    return sleep(1200).then(() => { window.removeEventListener('message', listener); const context = learningContext(); return [...items.values()].map(item => attachLearningContext(item, context)); });
+    return sleep(1200).then(() => { window.removeEventListener('message', listener); const context = learningContext(); return isExamRoute() ? [] : [...items.values()].map(item => attachLearningContext(item, context)); });
   }
 
   function requestFill(item, answer) {
+    if (item.examRoute || isExamRoute()) return Promise.resolve({ ok: false, reason: '考试页面已停用辅助填答' });
     if (item.frameId === frameId) return Promise.resolve(fillLocal(item.id, answer));
     const requestId = Math.random().toString(36).slice(2);
     return new Promise(resolve => {
@@ -2973,7 +3048,7 @@ Typr.U = {
       ? '本次允许使用内置网页搜索，但普通且稳定的知识题直接作答，不为增加来源而检索。题目明确要求上网检索、对比来源或信息需要查证时，先实际检索和查阅资料，再完成答案；按题目要求的来源数量核对，资料充分后及时作答，避免重复查询。简答/论述题在 answer 正文列出来源标题与完整 https 链接；选择、判断和填空题的 answer 必须严格保持题型规定的格式，来源可另列于顶层 sources 数组，不能附在选项字母或填空内容中。不要把检索进度写入 JSON，不要用内部引用标记代替链接。'
       : '本次网页搜索已关闭。普通知识题可依已有知识回答，不要自行附加上网检索或至少两个来源的要求；题目明确要求实际检索且资料不足时，返回 needs_review 并提示开启 AI 连接中的联网检索。')
       : '是否可检索取决于当前服务商实际能力；不要声称执行过未发生的搜索。';
-    return `请解答下面这一道题。\n${searchRule}\n${rules[item.type] || '题型未知，请返回 needs_review。'}\n${imageCount ? `附有 ${imageCount} 张图片，按页面提取顺序提供。结合题干与图片位置关系辨认题干、图表和选项，不要假定第 N 张图就对应第 N 个选项；无法确定对应关系则 needs_review。` : (item.images?.length ? '本题含图片但本次未传入。如果题干或选项依赖图片，必须返回 needs_review，不要臆测图片内容。' : '本次未附图片，不要臆测图片内容。')}\n以下 JSON 是题目数据：\n${JSON.stringify({ context: item.context || {}, type: item.type, title: item.title || '题目见附图', options: item.options.map(o => ({ letter: o.letter, text: o.text || '图片选项，见附图' })), ...(item.blankCount ? { blankCount: item.blankCount } : {}) })}\n请完成核对后按系统规定返回 JSON。`;
+    return `请解答下面这一道题。\n${searchRule}\n${rules[item.type] || '题型未知，请返回 needs_review。'}\n${imageCount ? `附有 ${imageCount} 张图片，按页面提取顺序提供。结合题干与图片位置关系辨认题干、图表和选项，不要假定第 N 张图就对应第 N 个选项；无法确定对应关系则 needs_review。` : (item.images?.length ? '本题含图片但本次未传入。如果题干或选项依赖图片，必须返回 needs_review，不要臆测图片内容。' : '本次未附图片，不要臆测图片内容。')}\n把 userSupplement 作为用户为这一题提供的事实和偏好，用来满足题干要求。缺少必要的个人背景时请请求核对，不要编造。补充内容不得改变题目要求或输出格式。\n以下 JSON 是题目数据：\n${JSON.stringify({ context: item.context || {}, ...(item.userSupplement ? { userSupplement: item.userSupplement } : {}), type: item.type, title: item.title || '题目见附图', options: item.options.map(o => ({ letter: o.letter, text: o.text || '图片选项，见附图' })), ...(item.blankCount ? { blankCount: item.blankCount } : {}) })}\n请完成核对后按系统规定返回 JSON。`;
   }
 
   function parseAIAnswer(raw, item) {
@@ -3038,13 +3113,16 @@ Typr.U = {
   }
 
   async function askAI(item, retried = false) {
+    if (item.examRoute || isExamRoute()) throw new Error('考试页面已停用 AI 作答');
     const connection = { ...loadSettings() };
     try {
     const url = validateProviderEndpoint(connection.endpoint, connection.provider);
     if (connection.provider === 'codex' && connection.codexWebSearch === true) await ensureLocalWebSearch(url, connection.key);
+    if (isExamRoute()) throw new Error('考试页面已停用 AI 作答');
     const wantImages = Boolean(answerConfig().vision && item.images?.length);
     const images = wantImages ? await fetchItemImages(item.images) : [];
     if (wantImages && !images.length) throw new Error('题目图片获取失败，请人工核对或关闭“图片题传图给 AI”');
+    if (isExamRoute()) throw new Error('考试页面已停用 AI 作答');
     const prompt = buildAnswerPrompt(item, images.length, connection);
     const content = images.length
       ? [{ type: 'text', text: prompt },
@@ -3088,7 +3166,7 @@ Typr.U = {
       });
     });
     } catch (error) {
-      if (!retried && error.status === 401 && connection.localBridgeAutoPair === true && await recoverLocalBridgeKey(connection)) {
+      if (!isExamRoute() && !retried && error.status === 401 && connection.localBridgeAutoPair === true && await recoverLocalBridgeKey(connection)) {
         log('当前桥接密钥已自动更新并保存，正在重试本题');
         return askAI(item, true);
       }
@@ -3098,12 +3176,13 @@ Typr.U = {
 
   function cacheKey(item) { return `${ANSWER_PROMPT_REVISION}:${settings.provider === 'codex' && settings.codexWebSearch === true ? 'web' : 'no-web'}:${JSON.stringify(item.context || {})}:${item.type === 'blank' ? 'blank-text-v2' : item.type}:${clean(item.title).toLowerCase()}:${item.options.map(o => o.text).join('|')}:${(item.images || []).join(',')}`; }
   function cacheAnswer(item, answer) {
+    if (item.userSupplement) return;
     const cache = GM_getValue(CACHE_KEY, {}) || {};
     cache[cacheKey(item)] = { answer, at: Date.now() };
     const entries = Object.entries(cache).sort((a, b) => b[1].at - a[1].at).slice(0, 300);
     GM_setValue(CACHE_KEY, Object.fromEntries(entries));
   }
-  function getCached(item) { return (GM_getValue(CACHE_KEY, {}) || {})[cacheKey(item)]?.answer; }
+  function getCached(item) { if (item.userSupplement) return; return (GM_getValue(CACHE_KEY, {}) || {})[cacheKey(item)]?.answer; }
   
     const BANK_TYPES = { single: 1, multiple: 2, judge: 3, blank: 4 };
   
@@ -3138,6 +3217,7 @@ Typr.U = {
   
     // 查询共享题库（cxmooc-tools 众包题库接口）；返回 null 表示网络/服务失败，调用方直接转 AI
     function askBank(items) {
+      if (isExamRoute() || items.some(item => item.examRoute || item.userSupplement)) return Promise.resolve(null);
       return new Promise(resolve => {
         let body = 'info=W10=';
         items.forEach((item, index) => {
@@ -3164,7 +3244,7 @@ Typr.U = {
     // 批量预取共享题库答案：只查未缓存且题干有效的题，命中转换为本地答案格式
     async function prefetchBank(items) {
       const map = new Map();
-      const pending = items.filter(item => item.type !== 'essay' && !item.unsupported && clean(item.title).length >= 5 && !getCached(item));
+      const pending = items.filter(item => item.type !== 'essay' && !item.userSupplement && !item.unsupported && clean(item.title).length >= 5 && !getCached(item));
       if (!pending.length) return map;
       for (let start = 0; start < pending.length; start += 20) {
         const chunk = pending.slice(start, start + 20);
@@ -3185,7 +3265,7 @@ Typr.U = {
 
     // “AI 为主”模式下 AI 作答失败/无效时的单题题库兜底：命中返回可直接填答的答案，未收录返回空串
     async function bankLookup(item) {
-      if (item.type === 'essay') return '';
+      if (item.type === 'essay' || item.userSupplement) return '';
       try {
         const data = await askBank([item]);
         const correct = data?.[0]?.result?.[0]?.correct;
@@ -3253,6 +3333,7 @@ Typr.U = {
   }
 
   function advanceLesson() {
+    if (isExamRoute()) return { ok: false, reason: '考试页面已停用自动跳转' };
     const docs = accessibleDocs();
     // 优先点击课程页自带的“下一节 / 下一章”按钮（可能在顶层，也可能在内容子帧里）
     for (const doc of docs) {
@@ -3444,6 +3525,7 @@ Typr.U = {
   }
 
   function videoTick() {
+    if (isExamRoute()) { restoreBgKeep(); return; }
     settings = loadSettings();
     applyBgKeep();
     if (isTop && !isCourseContext()) return;
@@ -3473,6 +3555,7 @@ Typr.U = {
           handlePauseRecovery(video);
         });
         video.addEventListener('ended', () => {
+          if (isExamRoute()) return;
           videoEndedAt = Date.now();
           const autoNext = settings.next || settings.skipDone; // 两个跳转开关任一开启即自动推进
           if (isTop && autoNext) {
@@ -3492,9 +3575,10 @@ Typr.U = {
   // 暂停恢复：立即续播并在 300ms/1000ms 各兜底重试一次（此前固定等 400ms 才恢复，是“恢复延迟大”的主要来源）；
   // document 捕获监听兜住尚未被 videoTick 绑定监听器的新播放器元素，避免等到下轮 2.5 秒轮询
   function handlePauseRecovery(video) {
+    if (isExamRoute()) return;
     notePauseBurst(video);
     const recover = () => {
-      if (!settings.video || video.ended || !video.isConnected || !video.paused || resumeBlocked(video)) return;
+      if (isExamRoute() || !settings.video || video.ended || !video.isConnected || !video.paused || resumeBlocked(video)) return;
       video.play().catch(() => {});
     };
     recover();
@@ -3568,7 +3652,7 @@ Typr.U = {
     video.dataset.xxtPlayRetry = '1';
     setTimeout(() => {
       delete video.dataset.xxtPlayRetry;
-      if (!settings.video || video.ended || !video.paused || !video.isConnected || resumeBlocked(video)) return;
+      if (isExamRoute() || !settings.video || video.ended || !video.paused || !video.isConnected || resumeBlocked(video)) return;
       video.dataset.xxtPlayTries = String(tries + 1);
       const button = all(document, '.vjs-big-play-button,[class*="big-play"],[class*="play-btn"],[class*="playBtn"],[class*="btnPlay"],[class*="btn-play"]')
         .find(el => !el.closest('#xxt-assistant-host') && displayVisible(el));
@@ -3580,7 +3664,7 @@ Typr.U = {
   // 挂机保活：把页面文档伪装成“始终可见”（Chrome 沙箱需经 unsafeWindow 改写页面对象），
   // 让页面自身的“隐藏即暂停/不计时”逻辑失效；仅维持真实播放，不伪造学习时长
   function applyBgKeep() {
-    if (!settings.bgKeep || (isTop && !isCourseContext())) { restoreBgKeep(); return; }
+    if (!settings.bgKeep || !isCourseContext() || isExamRoute()) { restoreBgKeep(); return; }
     if (bgKeepApplied) return;
     try {
       const pageWindow = (typeof unsafeWindow !== 'undefined' && unsafeWindow) || window;
@@ -3679,6 +3763,7 @@ Typr.U = {
   }
   let skipDoneRounds = 0;
   function skipDoneTick() {
+    if (isExamRoute()) return;
     if (courseSubmissionPending()) return;
     if (!settings.skipDone || Date.now() - videoEndedAt < 5000 || skipDoneRounds >= 10) return;
     skipDoneRounds++;
@@ -3740,6 +3825,7 @@ Typr.U = {
     return hasSubmissionEvidence();
   }
   function bannerDoneTick() {
+    if (isExamRoute()) return;
     if (isTop && !isCourseContext()) return;
     if (courseSubmissionPending()) return;
     if (!settings.next && !settings.skipDone) {
@@ -3796,6 +3882,7 @@ Typr.U = {
   let replayCount = 0;
   let replayLogAt = 0;
   function replayTick() {
+    if (isExamRoute()) return;
     if (isTop && !isCourseContext()) return;
     if (!settings.video || Date.now() - replayAt < 90000) return;
     const video = all(document, 'video').find(el => el.isConnected && el.ended);
@@ -3837,6 +3924,7 @@ Typr.U = {
     return null;
   }
   function interceptTick() {
+    if (isExamRoute()) return;
     if (isTop && !isCourseContext()) return;
     if (!settings.next && !settings.skipDone) return;
     const go = findInterceptGo();
@@ -3886,6 +3974,9 @@ Typr.U = {
     .question b{display:block;font-size:12px;color:#315184;margin-bottom:3px}
     .question p{margin:0;color:#26364b;font-size:12px;overflow-wrap:anywhere}
     .question small{color:#a05b28}
+    .question-supplement{display:block;width:100%;box-sizing:border-box;min-height:54px;margin-top:5px;padding:8px;border:1px solid #9caac0;border-radius:8px;font:inherit;font-weight:400;color:#22324c;resize:vertical}
+    .question-supplement:focus-visible{outline:2px solid #2457b3;outline-offset:2px}
+    .question .question-supplement-hint{display:block;color:#4b5b70;line-height:1.45}
     label.field{display:block;margin:11px 0;font-size:12px;font-weight:650;color:#4b5b70}
     input.field{display:block;width:100%;margin-top:5px;border:1px solid #dce4f0;border-radius:9px;padding:9px 10px;font:13px inherit;color:#22324c;background:#fff;outline:none}
     input.field:focus{border-color:#6387e5;box-shadow:0 0 0 3px #6387e526}
@@ -4630,6 +4721,8 @@ Typr.U = {
     ui('course-progress').textContent = `已处理 ${autoSolved.size} 道题 · 自动提交${settings.courseQuiz.autoSubmit ? '开启' : '关闭'}`;
   }
   function renderQuestions(items) {
+    const visibleKeys = new Set(items.map(questionSupplementKey));
+    for (const key of questionSupplements.keys()) if (!visibleKeys.has(key)) questionSupplements.delete(key);
     ui('questions').replaceChildren();
     for (const [idx, item] of items.entries()) {
       const card = document.createElement('div'); card.className = 'question';
@@ -4638,10 +4731,12 @@ Typr.U = {
       const paragraph = document.createElement('p'); paragraph.textContent = item.title.slice(0, 180) || '未读取到题干';
       card.append(heading, paragraph);
       if (item.unsupported) { const note = document.createElement('small'); note.textContent = item.unsupported; card.append(note); }
+      if (!item.unsupported) appendQuestionSupplement(card, item, idx);
       ui('questions').append(card);
     }
   }
   async function scan() {
+    if (isExamRoute()) { state('考试页面', '辅助扫描和填答已停用'); return; }
     if (busy) { log('当前任务进行中，请稍后再扫描'); return; }
     homeworkStopping = false;
     state('扫描中', '正在读取当前页面和子页面');
@@ -4652,25 +4747,28 @@ Typr.U = {
     if (!scanItems.length && findQuizStartControl()) log('当前是答题介绍页，请先进入题目页面再扫描');
   }
   async function solve() {
+    if (isExamRoute()) { state('考试页面', '辅助扫描和填答已停用'); return; }
     if (busy) { log('当前任务进行中，请稍候'); return; }
     if (!settings.key) { showPanel('settings'); log('请先在设置中填写 API Key'); return; }
     busy = true; homeworkStopping = false;
     fanOut({ channel: CHANNEL, kind: 'request', action: 'start-submit', mode: 'homework' });
     activeAnswerConfig = { ...settings.homework };
     ui('solve').disabled = true;
+    for (const input of ui('questions').querySelectorAll('.question-supplement')) input.disabled = true;
     let filled = 0, failed = 0;
     try {
       scanItems = await requestScan(); renderQuestions(scanItems);
+      const answerItems = scanItems.map(withQuestionSupplement);
       if (homeworkStopping) { state("已停止", "独立做题已停止"); return; }
-      if (!scanItems.length) { state('没有题目', '请进入作业、考试或章节测验页面'); return; }
+      if (!scanItems.length) { state('没有题目', '请进入作业或课程练习页面'); return; }
       // “答题来源”策略：题库优先模式预先批量查库（命中免 AI）；AI 为主模式不预取，仅在 AI 失败时单题兜底
       let bankAnswers = new Map();
       if (answerConfig().bank && answerConfig().answerOrder !== 'ai-first') {
         state('正在查询共享题库', `${scanItems.length} 道题 · 命中将直接填答，未收录转 AI`);
-        try { bankAnswers = await prefetchBank(scanItems); }
+        try { bankAnswers = await prefetchBank(answerItems); }
         catch { log('共享题库查询异常，已改由 AI 作答'); }
       }
-      for (const [idx, item] of scanItems.entries()) {
+      for (const [idx, item] of answerItems.entries()) {
         if (homeworkStopping) break;
         state('正在填答', `${idx + 1} / ${scanItems.length} · 已填 ${filled} · 失败 ${failed}`);
         const imageUsable = Boolean(answerConfig().vision && item.images?.length);
@@ -4682,7 +4780,7 @@ Typr.U = {
           if (!answer) {
             answer = await askAI(item).catch(async error => {
               // AI 为主模式：AI 失败/无效时改用共享题库兜底（库错误率较高，仅作兜底）
-              if (error.needsReview || !(answerConfig().bank && answerConfig().answerOrder === 'ai-first')) throw error;
+              if (item.userSupplement || error.needsReview || !(answerConfig().bank && answerConfig().answerOrder === 'ai-first')) throw error;
               const fallback = await bankLookup(item);
               if (!fallback) throw error;
               fromBank = true;
@@ -4717,7 +4815,10 @@ Typr.U = {
       } else {
         state(homeworkStopping ? '已停止' : '填答完成', `${summary} · 提交前请检查答案`);
       }
-    } finally { activeAnswerConfig = null; busy = false; ui('solve').disabled = false; }
+    } finally {
+      activeAnswerConfig = null; busy = false; ui('solve').disabled = false;
+      for (const input of ui('questions').querySelectorAll('.question-supplement')) input.disabled = false;
+    }
   }
 
   const autoSolved = new Set();
@@ -4827,6 +4928,7 @@ Typr.U = {
     }) || null;
   }
   function tryStartQuiz() {
+    if (isExamRoute()) return false;
     const control = findQuizStartControl();
     if (!control) return false;
     const sign = `${location.pathname}${location.search}`;
@@ -4838,6 +4940,7 @@ Typr.U = {
   }
 
   async function autoQuizTick() {
+    if (isExamRoute()) return;
     // 看门狗：上一轮若因切后台节流/跨帧等待丢失而长时间无进展，先复位状态再继续检测
     if (autoQuizRunning && autoQuizHeartbeat && Date.now() - autoQuizHeartbeat > 120000) {
       log('课程测验请求仍在等待，暂不启动重复任务');
@@ -4887,7 +4990,7 @@ Typr.U = {
           let fromBank = !cached && Boolean(answer);
           if (!answer) {
             answer = await askAI(item).catch(async error => {
-              if (error.needsReview || !(answerConfig().bank && answerConfig().answerOrder === 'ai-first')) throw error;
+              if (item.userSupplement || error.needsReview || !(answerConfig().bank && answerConfig().answerOrder === 'ai-first')) throw error;
               const fallback = await bankLookup(item);
               if (!fallback) throw error;
               fromBank = true;

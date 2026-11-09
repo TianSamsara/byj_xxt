@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 
 const source = readFileSync(new URL('./byj.user.js', import.meta.url), 'utf8');
 function load(context, name, next) {
+  if (name === 'askAI' && !context.isExamRoute) context.isExamRoute = () => false;
   const plain = source.indexOf(`  function ${name}(`);
   const start = plain >= 0 ? plain : source.indexOf(`  async function ${name}(`);
   const end = source.indexOf(`  ${next}`, start + 1);
@@ -31,6 +32,63 @@ test('essays accept multiple points in one editor; blanks retain exact counts', 
   const prompt = c.buildAnswerPrompt({ type: 'essay', title: '说明三个要点', options: [], blankCount: 1 }, 0);
   assert.match(prompt, /编辑器数量不是要点数量/);
   assert.doesNotMatch(prompt, /必须是恰好/);
+});
+
+test('per-question notes survive rescanning the same question, stay separate, and bypass stored answers', () => {
+  const c = answerContext();
+  c.frameId = 'test-frame'; c.busy = false;
+  c.document = { createElement: () => ({ append(...nodes) { this.children = nodes; }, setAttribute() {}, addEventListener(_event, callback) { this.input = callback; } }) };
+  const start = source.indexOf('  const questionSupplements =');
+  vm.runInContext(source.slice(start, source.indexOf('  let panel, shadow, ui;', start)), c);
+  const container = {};
+  const item = { supplementId: c.questionSupplementId(container), pageUrl: 'https://mooc1.chaoxing.com/work', type: 'essay', title: '选择主修相关岗位', options: [] };
+  const card = c.document.createElement();
+  c.appendQuestionSupplement(card, item, 0);
+  const input = card.children[0].children[0];
+  input.value = '主修：人力资源管理'; input.input();
+  const rescanned = { ...item, supplementId: c.questionSupplementId(container) };
+  const withNote = c.withQuestionSupplement(rescanned);
+  assert.equal(withNote.userSupplement, '主修：人力资源管理');
+  assert.equal(rescanned.userSupplement, undefined);
+  assert.equal(c.withQuestionSupplement({ ...item, title: '另一道题' }).userSupplement, undefined);
+  assert.equal(c.withQuestionSupplement({ ...item, supplementId: c.questionSupplementId({}) }).userSupplement, undefined);
+  assert.match(c.buildAnswerPrompt(withNote, 0), /"userSupplement":"主修：人力资源管理"/);
+  c.GM_getValue = () => assert.fail('supplemented question read the cache');
+  c.GM_setValue = () => assert.fail('supplemented question wrote to the cache');
+  load(c, 'cacheAnswer', 'const BANK_TYPES');
+  assert.equal(c.getCached(withNote), undefined);
+  c.cacheAnswer(withNote, '答案');
+  input.value = ''; input.input();
+  assert.equal(c.withQuestionSupplement(rescanned).userSupplement, undefined);
+});
+
+test('exam routes exit the generated script before handlers or settings are touched', () => {
+  for (const url of ['https://mooc1.chaoxing.com/exam-ans/exam/test/examcode/examnotes', 'https://mooc1.chaoxing.com/work?examId=123']) {
+    const window = {}; window.parent = window.top = window;
+    assert.doesNotThrow(() => vm.runInNewContext(source, { URL, location: new URL(url), window, document: {} }));
+  }
+});
+
+test('exam guard recognizes an exam ancestor or embedded exam without blocking ordinary homework', () => {
+  const guard = readFileSync(new URL('./userscript/exam-guard.js', import.meta.url), 'utf8');
+  const window = {}; window.parent = window.top = window;
+  const document = { querySelectorAll: () => [] };
+  const c = vm.createContext({ URL, location: new URL('https://mooc1.chaoxing.com/mooc-ans/mooc2/work/dowork?workId=1'), window, document });
+  vm.runInContext(guard.slice(0, guard.indexOf('  // Run before')), c);
+  assert.equal(c.isExamRoute(), false);
+  const exam = 'https://mooc1.chaoxing.com/exam-ans/exam/test/examcode/examnotes';
+  document.querySelectorAll = () => [{ src: exam }];
+  assert.equal(c.isExamRoute(), true);
+  document.querySelectorAll = () => [];
+  const parent = { location: new URL(exam) }; parent.parent = parent;
+  window.parent = window.top = parent;
+  assert.equal(c.isExamRoute(), true);
+});
+
+test('an exam opened after initialization blocks a new AI request', async () => {
+  const c = vm.createContext({ isExamRoute: () => true, loadSettings: () => assert.fail('exam request loaded connection settings') });
+  load(c, 'askAI', 'function cacheKey(');
+  await assert.rejects(c.askAI({}), /考试页面已停用/);
 });
 test('type detection separates named essays and true blanks', () => {
   const c = vm.createContext({ clean, text: x => x || '', one: node => node.title || '', all: () => [], asArray: x => x || [], blankTargets: node => Array(node.count || 1).fill({}) });

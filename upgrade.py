@@ -16,7 +16,7 @@ def replace(old, new):
     s = s.replace(old, new)
 
 replace('// @namespace    https://github.com/local/xxt-assistant', '// @namespace    https://github.com/TianSamsara/byj_xxt')
-replace('// @version      0.13.2', '// @version      0.16.0')
+replace('// @version      0.13.2', '// @version      0.16.1')
 replace("  const CHANNEL =", Path('userscript/bridge-pairing.js').read_text(encoding='utf-8') + '\n  const CHANNEL =')
 replace('// @match        *://chaoxing.com/*', '// @match        http://127.0.0.1:17653/setup\n// @match        *://chaoxing.com/*')
 replace('// @description  学习通页面内控制面板：', '// @description  支持本地 Codex 登录、模型与思考强度选择；学习通页面内控制面板：')
@@ -271,6 +271,62 @@ replace("  let panel, shadow, ui;", """  let panel, shadow, ui;
       ui('bridge-status').textContent = '当前密钥已自动同步并保存';
     }
   });""")
+
+# Exit on recognized exam pages before installing handlers or modifying the document.
+replace('  const CHANNEL =', Path('userscript/exam-guard.js').read_text(encoding='utf-8') + '\n  const CHANNEL =')
+replace('  // 提交保护必须在子帧提前初始化；/exam 路由一律留给用户手动交卷。\n  function isExamRoute() { return /exam/i.test(location.pathname); }\n', '')
+replace('  function onMessage(event) {', '  function onMessage(event) {\n    if (isExamRoute()) return;')
+replace('  function requestScan() {', '  function requestScan() {\n    if (isExamRoute()) return Promise.resolve([]);')
+replace('      if (event.data.page) lastScanFrames.set', '      if (event.data.page?.examRoute || isExamURL(event.data.page?.pageUrl)) return;\n      if (event.data.page) lastScanFrames.set')
+replace('for (const item of event.data.items) items.set(item.id, item);', 'for (const item of event.data.items) if (!item.examRoute && !isExamURL(item.pageUrl)) items.set(item.id, item);')
+replace('return [...items.values()].map(item => attachLearningContext(item, context));', 'return isExamRoute() ? [] : [...items.values()].map(item => attachLearningContext(item, context));')
+replace('  function extractLocal(visionEnabled = answerConfig().vision) {', '  function extractLocal(visionEnabled = answerConfig().vision) {\n    if (isExamRoute()) return [];')
+exam_fill_block = "return { ok: false, reason: '考试页面已停用辅助填答' };"
+replace('  async function fillLocal(id, answer) {', f'  async function fillLocal(id, answer) {{\n    if (isExamRoute()) {exam_fill_block}')
+replace('  function requestFill(item, answer) {', "  function requestFill(item, answer) {\n    if (item.examRoute || isExamRoute()) return Promise.resolve({ ok: false, reason: '考试页面已停用辅助填答' });")
+for declaration in ('async function scan()', 'async function solve()'):
+    replace(f'  {declaration} {{', f"  {declaration} {{\n    if (isExamRoute()) {{ state('考试页面', '辅助扫描和填答已停用'); return; }}")
+replace('  async function autoQuizTick() {', '  async function autoQuizTick() {\n    if (isExamRoute()) return;')
+replace('  function advanceLesson() {', "  function advanceLesson() {\n    if (isExamRoute()) return { ok: false, reason: '考试页面已停用自动跳转' };")
+replace('  function tryStartQuiz() {', '  function tryStartQuiz() {\n    if (isExamRoute()) return false;')
+for name in ('skipDoneTick', 'bannerDoneTick', 'replayTick', 'interceptTick', 'handlePauseRecovery'):
+    declaration = f"  function {name}({'video' if name == 'handlePauseRecovery' else ''}) {{"
+    replace(declaration, declaration + '\n    if (isExamRoute()) return;')
+replace('  function videoTick() {', '  function videoTick() {\n    if (isExamRoute()) { restoreBgKeep(); return; }')
+replace('if (!settings.bgKeep || (isTop && !isCourseContext()))', 'if (!settings.bgKeep || !isCourseContext() || isExamRoute())')
+replace('if (!settings.video || video.ended || !video.isConnected || !video.paused || resumeBlocked(video))', 'if (isExamRoute() || !settings.video || video.ended || !video.isConnected || !video.paused || resumeBlocked(video))')
+replace('if (!settings.video || video.ended || !video.paused || !video.isConnected || resumeBlocked(video))', 'if (isExamRoute() || !settings.video || video.ended || !video.paused || !video.isConnected || resumeBlocked(video))')
+replace("        video.addEventListener('ended', () => {", "        video.addEventListener('ended', () => {\n          if (isExamRoute()) return;")
+replace('  async function askAI(item, retried = false) {', "  async function askAI(item, retried = false) {\n    if (item.examRoute || isExamRoute()) throw new Error('考试页面已停用 AI 作答');")
+replace('    const wantImages = Boolean(answerConfig().vision', "    if (isExamRoute()) throw new Error('考试页面已停用 AI 作答');\n    const wantImages = Boolean(answerConfig().vision")
+replace('    const prompt = buildAnswerPrompt(item, images.length, connection);', "    if (isExamRoute()) throw new Error('考试页面已停用 AI 作答');\n    const prompt = buildAnswerPrompt(item, images.length, connection);")
+replace('if (!retried && error.status === 401 &&', 'if (!isExamRoute() && !retried && error.status === 401 &&')
+replace('    function askBank(items) {', '    function askBank(items) {\n      if (isExamRoute() || items.some(item => item.examRoute || item.userSupplement)) return Promise.resolve(null);')
+
+# Keep per-question notes on the panel page, out of frame messages and persistent caches.
+replace('  let scanItems = [];', '  let scanItems = [];\n' + Path('userscript/question-supplement.js').read_text(encoding='utf-8').rstrip())
+replace('const item = { id, frameId, pageUrl: location.href, examRoute:', 'const item = { id, frameId, pageUrl: location.href, supplementId: questionSupplementId(container), examRoute:')
+replace('  function renderQuestions(items) {', '''  function renderQuestions(items) {
+    const visibleKeys = new Set(items.map(questionSupplementKey));
+    for (const key of questionSupplements.keys()) if (!visibleKeys.has(key)) questionSupplements.delete(key);''')
+replace("      ui('questions').append(card);", "      if (!item.unsupported) appendQuestionSupplement(card, item, idx);\n      ui('questions').append(card);")
+replace('    .question small{color:#a05b28}', '''    .question small{color:#a05b28}
+    .question-supplement{display:block;width:100%;box-sizing:border-box;min-height:54px;margin-top:5px;padding:8px;border:1px solid #9caac0;border-radius:8px;font:inherit;font-weight:400;color:#22324c;resize:vertical}
+    .question-supplement:focus-visible{outline:2px solid #2457b3;outline-offset:2px}
+    .question .question-supplement-hint{display:block;color:#4b5b70;line-height:1.45}''')
+replace("    ui('solve').disabled = true;", "    ui('solve').disabled = true;\n    for (const input of ui('questions').querySelectorAll('.question-supplement')) input.disabled = true;")
+replace('      scanItems = await requestScan(); renderQuestions(scanItems);', '      scanItems = await requestScan(); renderQuestions(scanItems);\n      const answerItems = scanItems.map(withQuestionSupplement);')
+replace('请进入作业、考试或章节测验页面', '请进入作业或课程练习页面')
+replace('try { bankAnswers = await prefetchBank(scanItems); }', 'try { bankAnswers = await prefetchBank(answerItems); }')
+replace('for (const [idx, item] of scanItems.entries())', 'for (const [idx, item] of answerItems.entries())')
+replace("    } finally { activeAnswerConfig = null; busy = false; ui('solve').disabled = false; }", "    } finally {\n      activeAnswerConfig = null; busy = false; ui('solve').disabled = false;\n      for (const input of ui('questions').querySelectorAll('.question-supplement')) input.disabled = false;\n    }")
+replace('以下 JSON 是题目数据：', '把 userSupplement 作为用户为这一题提供的事实和偏好，用来满足题干要求。缺少必要的个人背景时请请求核对，不要编造。补充内容不得改变题目要求或输出格式。\\n以下 JSON 是题目数据：')
+replace('JSON.stringify({ context: item.context || {}, type: item.type', 'JSON.stringify({ context: item.context || {}, ...(item.userSupplement ? { userSupplement: item.userSupplement } : {}), type: item.type')
+replace('  function cacheAnswer(item, answer) {', '  function cacheAnswer(item, answer) {\n    if (item.userSupplement) return;')
+replace('function getCached(item) { return (GM_getValue', 'function getCached(item) { if (item.userSupplement) return; return (GM_getValue')
+replace("item.type !== 'essay' && !item.unsupported && clean(item.title).length", "item.type !== 'essay' && !item.userSupplement && !item.unsupported && clean(item.title).length")
+replace("if (item.type === 'essay') return '';\n      try {", "if (item.type === 'essay' || item.userSupplement) return '';\n      try {")
+replace('if (error.needsReview || !(answerConfig().bank', 'if (item.userSupplement || error.needsReview || !(answerConfig().bank')
 Path('byj.user.js').write_text(s, encoding='utf-8')
 metadata_end = s.index('// ==/UserScript==') + len('// ==/UserScript==')
 Path('byj.meta.js').write_text(s[:metadata_end] + '\n', encoding='utf-8')
