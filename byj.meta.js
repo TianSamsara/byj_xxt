@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         白玉京xxt神秘玩意
 // @namespace    https://github.com/TianSamsara/byj_xxt
-// @version      0.16.2
+// @version      0.16.3
 // @license      MIT
 // @homepageURL  https://github.com/TianSamsara/byj_xxt
 // @supportURL   https://github.com/TianSamsara/byj_xxt/issues

@@ -62,24 +62,13 @@ test('per-question notes survive rescanning the same question, stay separate, an
   assert.equal(c.withQuestionSupplement(rescanned).userSupplement, undefined);
 });
 
-test('exam routes initialize only a dismissible protection notice', () => {
-  for (const url of ['https://mooc1.chaoxing.com/exam-ans/exam/test/examcode/examnotes', 'https://mooc1.chaoxing.com/work?examId=123']) {
-    const window = {}; window.parent = window.top = window;
-    let mounted;
-    const element = () => ({
-      append(...children) { this.children = children; }, setAttribute() {},
-      attachShadow() { return this.shadow = element(); },
-      addEventListener(event, handler) { assert.equal(event, 'click'); this.dismiss = handler; },
-      remove() { mounted = null; }
-    });
-    const document = { body: { append(host) { mounted = host; } }, createElement: element, getElementById: () => null };
-    vm.runInNewContext(source, { URL, location: new URL(url), window, document });
-    const [title, detail, close] = mounted.shadow.children[1].children;
-    assert.match(title.textContent, /考试保护已启用/);
-    assert.match(detail.textContent, /扫描、AI 作答、填答和自动交卷均已停用/);
-    close.dismiss();
-    assert.equal(mounted, null);
-  }
+test('manual scan displays exam questions in the normal panel', async () => {
+  const items = [{ examRoute: true, title: '示例题' }];
+  const c = vm.createContext({ busy: false, homeworkStopping: false, scanItems: [], isExamRoute: () => true,
+    requestScan: async () => items, state() {}, log() {}, renderQuestions: results => assert.equal(results, items) });
+  load(c, 'scan', 'async function solve(');
+  await c.scan();
+  assert.equal(c.scanItems, items);
 });
 
 test('exam guard recognizes an exam ancestor or embedded exam without blocking ordinary homework', () => {
@@ -87,7 +76,7 @@ test('exam guard recognizes an exam ancestor or embedded exam without blocking o
   const window = {}; window.parent = window.top = window;
   const document = { querySelectorAll: () => [] };
   const c = vm.createContext({ URL, location: new URL('https://mooc1.chaoxing.com/mooc-ans/mooc2/work/dowork?workId=1'), window, document });
-  vm.runInContext(guard.slice(0, guard.indexOf('  // Run before')), c);
+  vm.runInContext(guard, c);
   assert.equal(c.isExamRoute(), false);
   const exam = 'https://mooc1.chaoxing.com/exam-ans/exam/test/examcode/examnotes';
   document.querySelectorAll = () => [{ src: exam }];
@@ -98,10 +87,20 @@ test('exam guard recognizes an exam ancestor or embedded exam without blocking o
   assert.equal(c.isExamRoute(), true);
 });
 
-test('an exam opened after initialization blocks a new AI request', async () => {
-  const c = vm.createContext({ isExamRoute: () => true, loadSettings: () => assert.fail('exam request loaded connection settings') });
+test('manual AI requests work for exam questions while course automation stays disabled', async () => {
+  const c = vm.createContext({ isExamRoute: () => true,
+    loadSettings: () => ({ endpoint: 'https://api.example.test/v1/chat/completions', provider: 'openai', key: 'test-key', model: 'test' }),
+    validateProviderEndpoint: value => value, answerConfig: () => ({ vision: false }),
+    buildAnswerPrompt: item => item.title, ANSWER_SYSTEM_PROMPT: '', parseAIAnswer: value => value,
+    GM_xmlhttpRequest: request => {
+      assert.equal(JSON.parse(request.data).messages[1].content, '示例题');
+      request.onload({ status: 200, responseText: '{"choices":[{"message":{"content":"示例答案"}}]}' });
+    }
+  });
   load(c, 'askAI', 'function cacheKey(');
-  await assert.rejects(c.askAI({}), /考试页面已停用/);
+  assert.equal(await c.askAI({ examRoute: true, title: '示例题' }), '示例答案');
+  load(c, 'autoQuizTick', 'setInterval(');
+  await c.autoQuizTick();
 });
 test('type detection separates named essays and true blanks', () => {
   const c = vm.createContext({ clean, text: x => x || '', one: node => node.title || '', all: () => [], asArray: x => x || [], blankTargets: node => Array(node.count || 1).fill({}) });
